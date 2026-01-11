@@ -18,10 +18,9 @@ import tensorflow as tf
 
 # Global model reference
 model = None
-# Auto-detect model path - check local folder first, then Gradio Web App folder
+# Auto-detect model path - check local folder first
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_gradio_model = os.path.join(os.path.dirname(_script_dir), "Gradio Web App", "unet_best.keras")
-MODEL_PATH = _gradio_model if os.path.exists(_gradio_model) else r"I:\My Drive\Colab Notebooks\Gradio Web App\unet_best.keras"
+MODEL_PATH = os.path.join(_script_dir, "unet_best.keras")
 
 def load_model():
     """Load the Keras model"""
