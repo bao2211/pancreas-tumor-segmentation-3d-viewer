@@ -8,6 +8,7 @@ import '../widgets/glass_card.dart';
 import '../widgets/scan_viewer.dart';
 import '../widgets/stats_panel.dart';
 import '../widgets/status_indicator.dart';
+import 'nii_viewer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -43,6 +44,54 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _pulseController.dispose();
     _serverUrlController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickNiiFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['gz', 'nii'],
+        dialogTitle: 'Select CT Scan (.nii.gz)',
+        withData: true,
+      );
+
+      if (result != null) {
+        final platformFile = result.files.single;
+        final bytes = platformFile.bytes ?? 
+           (platformFile.path != null ? File(platformFile.path!).readAsBytesSync() : null);
+
+        if (bytes == null) {
+          _showSnackBar('Could not read file data', isError: true);
+          return;
+        }
+
+        final mlService = context.read<MLService>();
+        if (!mlService.isModelLoaded) {
+          _showSnackBar('Server not connected.', isError: true);
+          return;
+        }
+
+        try {
+          final slices = await mlService.uploadNiiFile(bytes);
+           
+          if (!mounted) return;
+           
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => NiiViewerScreen(
+                slices: slices, 
+                fileName: platformFile.name
+              ),
+            ),
+          );
+        } catch (e) {
+          _showSnackBar('Failed: $e', isError: true);
+        }
+      }
+    } catch (e) {
+      _showSnackBar('Failed to pick file: $e', isError: true);
+    }
   }
 
   Future<void> _pickImage() async {
@@ -328,6 +377,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                   onPressed: _pickNiiFile,
+                   icon: const Icon(Icons.layers),
+                   label: const Text('Load 3D NIfTI (.nii.gz)'),
+                   style: OutlinedButton.styleFrom(
+                     padding: const EdgeInsets.symmetric(vertical: 16),
+                     side: const BorderSide(color: AppTheme.accentTeal),
+                     foregroundColor: AppTheme.accentTeal,
+                   ),
                 ),
               ),
               if (_selectedImage != null) ...[

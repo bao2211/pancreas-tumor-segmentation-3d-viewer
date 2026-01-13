@@ -111,6 +111,50 @@ class MLService extends ChangeNotifier {
     }
   }
 
+  /// Upload .nii.gz file bytes to server and get processed slices
+  Future<List<Map<String, dynamic>>> uploadNiiFile(List<int> bytes) async {
+    if (!_isModelLoaded) {
+      _statusMessage = 'Server not connected';
+      notifyListeners();
+      throw Exception('Server not connected');
+    }
+
+    try {
+      _isProcessing = true;
+      _statusMessage = 'Uploading and processing NIfTI file...';
+      notifyListeners();
+
+      final base64File = base64Encode(bytes);
+      
+      final response = await http.post(
+        Uri.parse('$_serverUrl/upload_nii'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'file_data': base64File,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+           List<dynamic> slices = data['slices'];
+           return List<Map<String, dynamic>>.from(slices);
+        } else {
+          throw Exception(data['error'] ?? 'Unknown server error');
+        }
+      } else {
+        throw Exception('Server returned ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Error uploading NII: $e');
+      rethrow;
+    } finally {
+      _isProcessing = false;
+      _statusMessage = 'Connected to server';
+      notifyListeners();
+    }
+  }
+
   /// Run inference via HTTP server
   Future<SegmentationResult> _runServerInference(
       String base64Image, int originalWidth, int originalHeight) async {
