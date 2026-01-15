@@ -191,10 +191,6 @@ class MLService extends ChangeNotifier {
     );
   }
 
-  @override
-  void dispose() {
-    super.dispose();
-  }
 }
 
 /// Result of segmentation inference

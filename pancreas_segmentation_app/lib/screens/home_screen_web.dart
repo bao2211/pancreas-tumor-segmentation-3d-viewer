@@ -136,7 +136,7 @@ class _HomeScreenWebState extends State<HomeScreenWeb> with TickerProviderStateM
               PlatformUtils.isWeb 
                   ? 'Enter the URL of your inference server.\nNote: Server must have CORS enabled for web.'
                   : 'Enter the URL of your inference server.\nFor Android, use your PC\'s IP address.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -144,7 +144,7 @@ class _HomeScreenWebState extends State<HomeScreenWeb> with TickerProviderStateM
               style: const TextStyle(color: AppTheme.textPrimary),
               decoration: InputDecoration(
                 labelText: 'Server URL',
-                labelStyle: TextStyle(color: AppTheme.textSecondary),
+                labelStyle: const TextStyle(color: AppTheme.textSecondary),
                 hintText: 'http://localhost:8765',
                 hintStyle: TextStyle(color: AppTheme.textSecondary.withValues(alpha: 0.5)),
                 border: OutlineInputBorder(
@@ -152,7 +152,7 @@ class _HomeScreenWebState extends State<HomeScreenWeb> with TickerProviderStateM
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: AppTheme.surfaceCardHover),
+                  borderSide: const BorderSide(color: AppTheme.surfaceCardHover),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -165,7 +165,7 @@ class _HomeScreenWebState extends State<HomeScreenWeb> with TickerProviderStateM
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -232,7 +232,7 @@ class _HomeScreenWebState extends State<HomeScreenWeb> with TickerProviderStateM
                 ),
                 Text(
                   'Pancreas Tumor Segmentation${PlatformUtils.isWeb ? ' (Web)' : ''}',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
                     color: AppTheme.textSecondary,
                   ),
@@ -546,7 +546,7 @@ class _HomeScreenWebState extends State<HomeScreenWeb> with TickerProviderStateM
                   ),
                   child: Container(
                     padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                       shape: BoxShape.circle,
                       color: AppTheme.surfaceCard,
                     ),
@@ -569,7 +569,7 @@ class _HomeScreenWebState extends State<HomeScreenWeb> with TickerProviderStateM
               ),
             ),
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'Upload a CT scan image to begin analysis',
               style: TextStyle(
                 fontSize: 14,

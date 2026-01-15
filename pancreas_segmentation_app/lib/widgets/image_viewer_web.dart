@@ -240,12 +240,12 @@ class _ImageViewerWebState extends State<ImageViewerWeb> {
           displayBytes,
           fit: BoxFit.contain,
           errorBuilder: (context, error, stackTrace) {
-            return Center(
+            return const Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error_outline, size: 48, color: AppTheme.error),
-                  const SizedBox(height: 16),
+                  Icon(Icons.error_outline, size: 48, color: AppTheme.error),
+                  SizedBox(height: 16),
                   Text(
                     'Failed to load image',
                     style: TextStyle(color: AppTheme.textSecondary),

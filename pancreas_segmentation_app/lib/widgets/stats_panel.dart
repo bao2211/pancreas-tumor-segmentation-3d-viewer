@@ -142,14 +142,14 @@ class StatsPanel extends StatelessWidget {
                 color: AppTheme.surfaceDark,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
+              child: const Row(
                 children: [
                   Icon(
                     Icons.info_outline,
                     size: 16,
                     color: AppTheme.warning,
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'This analysis is for reference only. Please consult a medical professional.',

@@ -61,7 +61,7 @@ class StatusIndicator extends StatelessWidget {
             ),
             if (!isConnected && onRetry != null) ...[
               const SizedBox(width: 4),
-              Icon(
+              const Icon(
                 Icons.refresh,
                 size: 14,
                 color: AppTheme.warning,

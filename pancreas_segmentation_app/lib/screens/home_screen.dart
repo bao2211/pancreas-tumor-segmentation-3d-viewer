@@ -127,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               'Enter the URL of your inference server.\nFor Android, use your PC\'s IP address (e.g., http://192.168.1.100:8765)',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
@@ -137,7 +137,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               style: const TextStyle(color: AppTheme.textPrimary),
               decoration: InputDecoration(
                 labelText: 'Server URL',
-                labelStyle: TextStyle(color: AppTheme.textSecondary),
+                labelStyle: const TextStyle(color: AppTheme.textSecondary),
                 hintText: 'http://192.168.1.100:8765',
                 hintStyle: TextStyle(color: AppTheme.textSecondary.withOpacity(0.5)),
                 border: OutlineInputBorder(
@@ -145,7 +145,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: AppTheme.surfaceCardHover),
+                  borderSide: const BorderSide(color: AppTheme.surfaceCardHover),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -158,7 +158,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
+            child: const Text('Cancel', style: TextStyle(color: AppTheme.textSecondary)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -212,11 +212,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             child: const Icon(Icons.biotech, color: Colors.white, size: 28),
           ),
           const SizedBox(width: 16),
-          Expanded(
+          const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'CT Scan Analyzer',
                   style: TextStyle(
                     fontSize: 22,
@@ -547,7 +547,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                   child: Container(
                     padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                       shape: BoxShape.circle,
                       color: AppTheme.surfaceCard,
                     ),
@@ -570,7 +570,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'Upload a CT scan image to begin analysis',
               style: TextStyle(
                 fontSize: 14,

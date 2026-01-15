@@ -1,12 +1,8 @@
 import 'dart:io';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as path;
 
 // Conditional import for TFLite - only available on mobile
 import 'ml_service_mobile.dart' if (dart.library.html) 'ml_service_stub.dart';
