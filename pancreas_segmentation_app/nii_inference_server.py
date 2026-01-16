@@ -348,23 +348,23 @@ def create_overlay(slice_data, pancreas_mask, tumor_mask):
     img = cv2.resize(img, (256, 256))
     img_rgb = cv2.cvtColor((img * 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
     
-    # Draw pancreas contours (cyan)
+    # Draw pancreas contours (cyan) - thin outline
     if pancreas_mask is not None and np.any(pancreas_mask == 1):
         contours, _ = cv2.findContours(
             pancreas_mask.astype(np.uint8),
             cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_SIMPLE
         )
-        cv2.drawContours(img_rgb, contours, -1, (0, 255, 255), 2)  # Cyan (RGB)
+        cv2.drawContours(img_rgb, contours, -1, (0, 255, 255), 1)  # Cyan (RGB)
     
-    # Draw tumor contours (red)
+    # Draw tumor contours (red) - thin outline
     if tumor_mask is not None and np.any(tumor_mask == 1):
         contours, _ = cv2.findContours(
             tumor_mask.astype(np.uint8),
             cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_SIMPLE
         )
-        cv2.drawContours(img_rgb, contours, -1, (255, 0, 0), 2)  # Red (RGB)
+        cv2.drawContours(img_rgb, contours, -1, (255, 0, 0), 1)  # Red (RGB)
     
     return img_rgb
 

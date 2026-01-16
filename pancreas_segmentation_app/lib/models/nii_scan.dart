@@ -23,6 +23,57 @@ class NiiScan {
   bool get hasAnyTumor => slices.any((s) => s.hasTumor);
   
   bool get isFullyScanned => slices.every((s) => s.isScanned);
+  
+  /// Total pancreas pixels across all slices
+  int get totalPancreasPixels => slices
+      .where((s) => s.isScanned)
+      .fold(0, (sum, s) => sum + s.pancreasPixels);
+  
+  /// Total tumor pixels across all slices
+  int get totalTumorPixels => slices
+      .where((s) => s.isScanned)
+      .fold(0, (sum, s) => sum + s.tumorPixels);
+  
+  /// Tumor burden: percentage of tumor pixels relative to pancreas pixels
+  double get tumorBurden {
+    if (totalPancreasPixels == 0) return 0.0;
+    return (totalTumorPixels / totalPancreasPixels) * 100;
+  }
+  
+  /// Percentage of slices with pancreas
+  double get pancreasSlicePercentage {
+    if (numScanned == 0) return 0.0;
+    return (numWithPancreas / numScanned) * 100;
+  }
+  
+  /// Percentage of slices with tumor
+  double get tumorSlicePercentage {
+    if (numScanned == 0) return 0.0;
+    return (numWithTumor / numScanned) * 100;
+  }
+  
+  /// Estimated volume dimensions (assuming standard CT spacing)
+  String get volumeDimensions => '${volumeShape[0]} × ${volumeShape[1]} × ${volumeShape[2]}';
+  
+  /// Average tumor pixels per affected slice
+  double get avgTumorPixelsPerSlice {
+    if (numWithTumor == 0) return 0.0;
+    return totalTumorPixels / numWithTumor;
+  }
+  
+  /// Maximum tumor pixels in a single slice
+  int get maxTumorPixelsInSlice => slices
+      .where((s) => s.isScanned && s.hasTumor)
+      .fold(0, (max, s) => s.tumorPixels > max ? s.tumorPixels : max);
+  
+  /// Index of slice with maximum tumor
+  int? get maxTumorSliceIndex {
+    if (numWithTumor == 0) return null;
+    final maxSlice = slices
+        .where((s) => s.isScanned && s.hasTumor)
+        .reduce((a, b) => a.tumorPixels > b.tumorPixels ? a : b);
+    return maxSlice.index;
+  }
 }
 
 /// Represents a single CT slice from the scan
