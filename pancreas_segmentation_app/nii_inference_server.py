@@ -41,6 +41,17 @@ except ImportError:
 pancreas_model = None
 tumor_model = None
 current_volume = None  # Store loaded NIfTI volume for scanning
+current_volume_shape = None  # Shape of the current volume
+
+# Global storage for 3D masks (for 3D visualization)
+accumulated_masks = {
+    'pancreas': None,  # Will be 3D numpy array
+    'tumor': None,
+    'shape': None,
+}
+
+# Global storage for last generated 3D model path
+_last_3d_model_path = None
 
 # Context-aware prediction system
 class TumorContext:
@@ -208,6 +219,116 @@ def load_models():
     
     return pancreas_model, tumor_model
 
+def generate_3d_mesh_from_masks(volume_masks, spacing=(1.0, 1.0, 1.0)):
+    """
+    Generate 3D meshes from segmentation masks using marching cubes.
+    
+    Args:
+        volume_masks: dict with 'pancreas' and 'tumor' 3D numpy arrays
+        spacing: voxel spacing for proper scaling
+    
+    Returns:
+        GLB (binary glTF) data bytes for both meshes
+    """
+    try:
+        from skimage.measure import marching_cubes
+        import trimesh
+    except ImportError as e:
+        print(f"[ERROR] Missing dependencies for 3D mesh generation: {e}")
+        print("[INFO] Install with: pip install scikit-image trimesh")
+        raise
+    
+    print("[INFO] Generating 3D meshes from segmentation masks...")
+    meshes = []
+    
+    # Generate pancreas mesh (if exists)
+    if volume_masks['pancreas'] is not None and np.any(volume_masks['pancreas'] > 0):
+        print("[INFO] Processing pancreas mesh...")
+        try:
+            verts, faces, normals, _ = marching_cubes(
+                volume_masks['pancreas'], 
+                level=0.5,
+                spacing=spacing,
+                allow_degenerate=False
+            )
+            pancreas_mesh = trimesh.Trimesh(
+                vertices=verts,
+                faces=faces,
+                vertex_normals=normals
+            )
+            # Set cyan color with semi-transparency for all vertices
+            num_vertices = len(verts)
+            pancreas_mesh.visual.vertex_colors = np.tile([0, 255, 255, 200], (num_vertices, 1))
+            
+            # Simplify mesh for web performance (optional)
+            try:
+                if len(pancreas_mesh.faces) > 10000:
+                    print(f"[INFO] Simplifying pancreas mesh from {len(pancreas_mesh.faces)} faces...")
+                    pancreas_mesh = pancreas_mesh.simplify_quadric_decimation(10000)
+                    print(f"[INFO] Simplified to {len(pancreas_mesh.faces)} faces")
+            except Exception as simplify_error:
+                print(f"[WARNING] Could not simplify pancreas mesh: {simplify_error}")
+                print(f"[INFO] Continuing with original mesh ({len(pancreas_mesh.faces)} faces)")
+            
+            meshes.append(('pancreas', pancreas_mesh))
+            print(f"[OK] Pancreas mesh: {len(pancreas_mesh.vertices)} vertices, {len(pancreas_mesh.faces)} faces")
+        except Exception as e:
+            print(f"[WARNING] Failed to generate pancreas mesh: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Generate tumor mesh (if exists)
+    if volume_masks['tumor'] is not None and np.any(volume_masks['tumor'] > 0):
+        print("[INFO] Processing tumor mesh...")
+        try:
+            verts, faces, normals, _ = marching_cubes(
+                volume_masks['tumor'],
+                level=0.5,
+                spacing=spacing,
+                allow_degenerate=False
+            )
+            tumor_mesh = trimesh.Trimesh(
+                vertices=verts,
+                faces=faces,
+                vertex_normals=normals
+            )
+            # Set red color with mostly opaque for all vertices
+            num_vertices = len(verts)
+            tumor_mesh.visual.vertex_colors = np.tile([255, 0, 0, 255], (num_vertices, 1))
+            
+            # Simplify mesh for web performance (optional)
+            try:
+                if len(tumor_mesh.faces) > 5000:
+                    print(f"[INFO] Simplifying tumor mesh from {len(tumor_mesh.faces)} faces...")
+                    tumor_mesh = tumor_mesh.simplify_quadric_decimation(5000)
+                    print(f"[INFO] Simplified to {len(tumor_mesh.faces)} faces")
+            except Exception as simplify_error:
+                print(f"[WARNING] Could not simplify tumor mesh: {simplify_error}")
+                print(f"[INFO] Continuing with original mesh ({len(tumor_mesh.faces)} faces)")
+            
+            meshes.append(('tumor', tumor_mesh))
+            print(f"[OK] Tumor mesh: {len(tumor_mesh.vertices)} vertices, {len(tumor_mesh.faces)} faces")
+        except Exception as e:
+            print(f"[WARNING] Failed to generate tumor mesh: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    if not meshes:
+        print("[WARNING] No meshes generated")
+        return None
+    
+    # Export to glTF
+    print("[INFO] Exporting to glTF format...")
+    scene = trimesh.Scene()
+    for name, mesh in meshes:
+        scene.add_geometry(mesh, node_name=name)
+    
+    # Export as GLB (binary glTF format - more compact and returns bytes)
+    gltf_data = scene.export(file_type='glb')
+    print(f"[OK] GLB generated: {len(gltf_data)} bytes")
+    
+    return gltf_data
+
 def hu_window(img):
     """
     HU windowing from the notebook:
@@ -339,6 +460,24 @@ def process_ct_slice(slice_data, z_idx, pancreas_model, tumor_model, use_context
         if use_context:
             tumor_context.add_prediction(z_idx, None)
     
+    # === ACCUMULATE MASKS FOR 3D VISUALIZATION ===
+    global accumulated_masks, current_volume_shape
+    
+    # Initialize accumulated masks if this is the first slice
+    if accumulated_masks['pancreas'] is None and current_volume_shape is not None:
+        depth = current_volume_shape[2]
+        accumulated_masks['shape'] = (256, 256, depth)
+        accumulated_masks['pancreas'] = np.zeros((256, 256, depth), dtype=np.uint8)
+        accumulated_masks['tumor'] = np.zeros((256, 256, depth), dtype=np.uint8)
+        print(f"[INFO] Initialized 3D mask accumulation: shape={accumulated_masks['shape']}")
+    
+    # Store masks at this slice index
+    if accumulated_masks['pancreas'] is not None:
+        if results['pancreas_mask'] is not None:
+            accumulated_masks['pancreas'][:, :, z_idx] = results['pancreas_mask']
+        if results['tumor_mask'] is not None:
+            accumulated_masks['tumor'][:, :, z_idx] = results['tumor_mask']
+    
     return results
 
 def create_overlay(slice_data, pancreas_mask, tumor_mask):
@@ -378,7 +517,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
     
     def do_GET(self):
-        """Health check endpoint"""
+        """Handle GET requests"""
         if self.path == '/health':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -390,6 +529,26 @@ class RequestHandler(BaseHTTPRequestHandler):
                 'nibabel_available': HAS_NIBABEL
             }
             self.wfile.write(json.dumps(response).encode())
+        elif self.path == '/model.glb':
+            # Serve the last generated 3D model
+            global _last_3d_model_path
+            if _last_3d_model_path and os.path.exists(_last_3d_model_path):
+                try:
+                    with open(_last_3d_model_path, 'rb') as f:
+                        model_data = f.read()
+                    
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'model/gltf-binary')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Length', str(len(model_data)))
+                    self.end_headers()
+                    self.wfile.write(model_data)
+                    print(f"[INFO] Served 3D model: {len(model_data)} bytes")
+                except Exception as e:
+                    print(f"[ERROR] Failed to serve model: {e}")
+                    self.send_error(500)
+            else:
+                self.send_error(404, 'Model not found')
         else:
             self.send_error(404)
     
@@ -403,12 +562,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_scan_all()
         elif self.path == '/reset_context':
             self._handle_reset_context()
+        elif self.path == '/generate_3d_model':
+            self._handle_generate_3d_model()
         else:
             self.send_error(404)
     
     def _handle_load_nii(self):
         """Load .nii file and extract all slices"""
-        global current_volume, tumor_context
+        global current_volume, current_volume_shape, tumor_context, accumulated_masks
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -422,10 +583,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             
             # Store volume globally for scan_slice endpoint
             current_volume = volume
+            current_volume_shape = volume.shape
             
             # Reset tumor context for new volume
             tumor_context.reset()
             print(f"[INFO] Context reset for new volume")
+            
+            # Reset accumulated masks for new volume
+            accumulated_masks = {
+                'pancreas': None,
+                'tumor': None,
+                'shape': None,
+            }
+            print(f"[INFO] Accumulated masks reset for new volume")
             
             # Extract all slices as base64-encoded PNGs
             slices = []
@@ -641,6 +811,82 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             error_response = {'success': False, 'error': str(e)}
+            self.wfile.write(json.dumps(error_response).encode())
+    
+    def _handle_generate_3d_model(self):
+        """Generate 3D mesh from accumulated segmentation masks"""
+        global accumulated_masks
+        try:
+            # Check if we have accumulated masks
+            if accumulated_masks['pancreas'] is None:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                error_response = {
+                    'success': False,
+                    'error': 'No scan data available. Please run a full scan first.'
+                }
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            print("[INFO] Generating 3D model...")
+            
+            # Generate meshes using marching cubes
+            gltf_bytes = generate_3d_mesh_from_masks({
+                'pancreas': accumulated_masks['pancreas'],
+                'tumor': accumulated_masks['tumor'],
+            })
+            
+            if gltf_bytes is None:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                error_response = {
+                    'success': False,
+                    'error': 'Failed to generate 3D model. No valid geometry found.'
+                }
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            # Save to temporary file for serving
+            import tempfile
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.glb', dir=os.path.dirname(__file__))
+            temp_file.write(gltf_bytes)
+            temp_file.close()
+            
+            # Store the temp file path globally
+            global _last_3d_model_path
+            _last_3d_model_path = temp_file.name
+            
+            response = {
+                'success': True,
+                'model_url': f'http://localhost:8765/model.glb',
+                'size_bytes': len(gltf_bytes)
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode())
+            
+            print(f"[OK] 3D model generated and ready: {len(gltf_bytes)} bytes at {temp_file.name}")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to generate 3D model: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            error_response = {
+                'success': False,
+                'error': f'3D generation failed: {str(e)}'
+            }
             self.wfile.write(json.dumps(error_response).encode())
 
 def main():

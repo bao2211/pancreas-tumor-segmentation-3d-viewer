@@ -6,6 +6,7 @@ import '../models/nii_scan.dart';
 import '../theme/app_theme.dart';
 import '../widgets/model_info_card.dart';
 import '../widgets/scan_statistics_panel.dart';
+import '../widgets/volume_3d_viewer.dart';
 
 class NiiScanScreen extends StatefulWidget {
   const NiiScanScreen({super.key});
@@ -83,6 +84,73 @@ class _NiiScanScreenState extends State<NiiScanScreen> {
     
     if (service.currentScan!.hasAnyTumor) {
       _showTumorAlert();
+    }
+  }
+
+  Future<void> _open3DViewer() async {
+    final service = context.read<NiiService>();
+    
+    // Show loading dialog
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Container(
+        color: Colors.black.withValues(alpha: 0.7),
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: AppTheme.primaryBlue),
+              SizedBox(height: 16),
+              Text(
+                'Generating 3D model...',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 16,
+                ),
+              ),
+              SizedBox(height: 8),
+              Text(
+                'This may take a moment',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    
+    // Generate 3D model
+    final gltfData = await service.generate3DModel();
+    
+    print('Received gltfData from service: ${gltfData != null ? "YES" : "NO"}');
+    if (gltfData != null) {
+      print('gltfData length: ${gltfData.length}');
+      print('gltfData starts with: ${gltfData.substring(0, 50)}');
+    }
+    
+    if (!mounted) return;
+    Navigator.pop(context); // Close loading dialog
+    
+    if (gltfData != null) {
+      print('Opening Volume3DViewer dialog...');
+      // Show 3D viewer in fullscreen dialog
+      showDialog(
+        context: context,
+        builder: (context) {
+          print('Building Volume3DViewer with data length: ${gltfData.length}');
+          return Volume3DViewer(
+            gltfData: gltfData,
+            onClose: () => Navigator.pop(context),
+          );
+        },
+      );
+    } else {
+      _showSnackBar('Failed to generate 3D model', isError: true);
     }
   }
 
@@ -512,6 +580,24 @@ class _NiiScanScreenState extends State<NiiScanScreen> {
               ),
             ),
           ),
+          if (scan.isFullyScanned) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: service.isLoading ? null : _open3DViewer,
+                icon: const Icon(Icons.view_in_ar),
+                label: const Text('View in 3D'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.accentTeal,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,

@@ -284,6 +284,67 @@ class NiiService extends ChangeNotifier {
   }
   
   /// Clear current scan
+  /// Generate 3D model from accumulated segmentation masks
+  Future<String?> generate3DModel() async {
+    if (_currentScan == null || !_currentScan!.isFullyScanned) {
+      debugPrint('Cannot generate 3D model: scan not complete');
+      return null;
+    }
+    
+    try {
+      _isLoading = true;
+      _statusMessage = 'Generating 3D model...';
+      notifyListeners();
+      
+      // Step 1: Request 3D model generation
+      final response = await http.post(
+        Uri.parse('$_serverUrl/generate_3d_model'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 120)); // Mesh generation takes time
+      
+      if (response.statusCode != 200) {
+        throw Exception('Server error: ${response.statusCode}');
+      }
+      
+      final data = jsonDecode(response.body);
+      
+      if (data['success'] != true) {
+        throw Exception(data['error'] ?? 'Failed to generate 3D model');
+      }
+      
+      debugPrint('3D model generated: ${data['size_bytes']} bytes');
+      
+      // Step 2: Fetch the actual GLB file
+      final modelUrl = data['model_url'] as String;
+      debugPrint('Fetching model from: $modelUrl');
+      
+      final modelResponse = await http.get(Uri.parse(modelUrl))
+          .timeout(const Duration(seconds: 30));
+      
+      if (modelResponse.statusCode != 200) {
+        throw Exception('Failed to fetch model: ${modelResponse.statusCode}');
+      }
+      
+      // Convert to base64 data URL
+      final base64Data = base64Encode(modelResponse.bodyBytes);
+      final dataUrl = 'data:model/gltf-binary;base64,$base64Data';
+      
+      _statusMessage = 'Ready';
+      _isLoading = false;
+      notifyListeners();
+      
+      debugPrint('3D model ready as data URL: ${base64Data.length} chars');
+      return dataUrl;
+      
+    } catch (e) {
+      _statusMessage = 'Failed to generate 3D model';
+      _isLoading = false;
+      notifyListeners();
+      debugPrint('Error generating 3D model: $e');
+      return null;
+    }
+  }
+  
   void clearScan() {
     _currentScan = null;
     _scanProgress = 0.0;
