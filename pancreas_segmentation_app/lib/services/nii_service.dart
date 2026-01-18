@@ -345,6 +345,81 @@ class NiiService extends ChangeNotifier {
     }
   }
   
+  /// Generate volume data with 3D model for volume rendering
+  Future<Map<String, dynamic>?> generateVolumeViewer() async {
+    if (_currentScan == null) {
+      debugPrint('Cannot generate volume viewer: no scan loaded');
+      return null;
+    }
+    
+    try {
+      _isLoading = true;
+      _statusMessage = 'Generating volume visualization...';
+      notifyListeners();
+      
+      // Request volume data generation (includes meshes if available)
+      final response = await http.post(
+        Uri.parse('$_serverUrl/generate_volume_data'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(const Duration(seconds: 180)); // Volume processing takes time
+      
+      if (response.statusCode != 200) {
+        throw Exception('Server error: ${response.statusCode}');
+      }
+      
+      final data = jsonDecode(response.body);
+      
+      if (data['success'] != true) {
+        throw Exception(data['error'] ?? 'Failed to generate volume data');
+      }
+      
+      debugPrint('Volume data generated: ${data['data_size_bytes']} bytes (base64)');
+      debugPrint('Dimensions: ${data['dimensions']}');
+      
+      // Prepare result
+      final result = {
+        'volume_data': data['volume_data'],
+        'dimensions': data['dimensions'],
+        'spacing': data['spacing'],
+        'window_min': data['window_min'],
+        'window_max': data['window_max'],
+      };
+      
+      // If model URL is provided, fetch the GLB file
+      if (data['model_url'] != null) {
+        final modelUrl = data['model_url'] as String;
+        debugPrint('Fetching model from: $modelUrl');
+        
+        final modelResponse = await http.get(Uri.parse(modelUrl))
+            .timeout(const Duration(seconds: 30));
+        
+        if (modelResponse.statusCode == 200) {
+          // Convert to base64 data URL
+          final base64Data = base64Encode(modelResponse.bodyBytes);
+          final dataUrl = 'data:model/gltf-binary;base64,$base64Data';
+          result['modelUrl'] = dataUrl;
+          debugPrint('Model URL prepared: ${base64Data.length} chars');
+        } else {
+          debugPrint('Warning: Failed to fetch model: ${modelResponse.statusCode}');
+        }
+      }
+      
+      _statusMessage = 'Ready';
+      _isLoading = false;
+      notifyListeners();
+      
+      debugPrint('Volume viewer data ready');
+      return result;
+      
+    } catch (e) {
+      _statusMessage = 'Failed to generate volume visualization';
+      _isLoading = false;
+      notifyListeners();
+      debugPrint('Error generating volume viewer: $e');
+      return null;
+    }
+  }
+  
   void clearScan() {
     _currentScan = null;
     _scanProgress = 0.0;

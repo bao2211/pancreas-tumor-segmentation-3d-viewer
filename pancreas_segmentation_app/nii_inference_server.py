@@ -42,6 +42,7 @@ pancreas_model = None
 tumor_model = None
 current_volume = None  # Store loaded NIfTI volume for scanning
 current_volume_shape = None  # Shape of the current volume
+current_volume_spacing = (1.0, 1.0, 1.0)  # Store voxel spacing from NIfTI header
 
 # Global storage for 3D masks (for 3D visualization)
 accumulated_masks = {
@@ -329,6 +330,98 @@ def generate_3d_mesh_from_masks(volume_masks, spacing=(1.0, 1.0, 1.0)):
     
     return gltf_data
 
+def export_volume_data(volume, target_size=256):
+    """
+    Export volume data for volume rendering in Three.js.
+    
+    Args:
+        volume: 3D numpy array with CT data
+        target_size: Target dimension for downsampling (e.g., 256 for 256^3)
+    
+    Returns:
+        Dictionary with volume data (base64), dimensions, spacing
+    """
+    print(f"[INFO] Exporting volume data for rendering...")
+    print(f"[INFO] Original volume shape: {volume.shape}")
+    
+    # Get original dimensions
+    orig_shape = volume.shape
+    
+    # Downsample to fixed cube size for WebGL
+    print(f"[INFO] Resampling to {target_size}x{target_size}x{target_size} cube...")
+    try:
+        from scipy.ndimage import zoom
+        # Calculate scale factors to get exact target_size in each dimension
+        scale_factors = [
+            target_size / orig_shape[0],
+            target_size / orig_shape[1],
+            target_size / orig_shape[2]
+        ]
+        volume_downsampled = zoom(volume, scale_factors, order=1)
+        print(f"[INFO] Resampled shape: {volume_downsampled.shape}")
+    except ImportError:
+        print("[WARNING] scipy not available, using simpler downsampling...")
+        # Calculate steps for each dimension to get close to target_size
+        step_x = max(1, orig_shape[0] // target_size)
+        step_y = max(1, orig_shape[1] // target_size)
+        step_z = max(1, orig_shape[2] // target_size)
+        volume_downsampled = volume[::step_x, ::step_y, ::step_z]
+        print(f"[INFO] Downsampled shape: {volume_downsampled.shape}")
+    
+    # Ensure exact dimensions by padding or cropping
+    final_volume = np.zeros((target_size, target_size, target_size), dtype=np.float32)
+    x_end = min(target_size, volume_downsampled.shape[0])
+    y_end = min(target_size, volume_downsampled.shape[1])
+    z_end = min(target_size, volume_downsampled.shape[2])
+    final_volume[:x_end, :y_end, :z_end] = volume_downsampled[:x_end, :y_end, :z_end]
+    volume_downsampled = final_volume
+    print(f"[INFO] Final cube shape: {volume_downsampled.shape}")
+    
+    # Apply HU windowing for soft tissue visualization
+    # Standard soft tissue window: -150 to 250 HU
+    window_min = -150
+    window_max = 250
+    volume_windowed = np.clip(volume_downsampled, window_min, window_max)
+    
+    # Normalize to 0-255 range for texture
+    volume_normalized = ((volume_windowed - window_min) / (window_max - window_min) * 255).astype(np.uint8)
+    
+    print(f"[INFO] Volume normalized to uint8, shape: {volume_normalized.shape}")
+    print(f"[INFO] Value range: {volume_normalized.min()} to {volume_normalized.max()}")
+    print(f"[INFO] Sample values at center: {volume_normalized[target_size//2, target_size//2, target_size//2-5:target_size//2+5]}")
+    
+    # Flatten to 1D array in C-order (row-major)
+    volume_flat = volume_normalized.flatten('C')
+    
+    # Verify size
+    expected_size = target_size * target_size * target_size
+    actual_size = len(volume_flat)
+    print(f"[INFO] Flattened array size: {actual_size} (expected: {expected_size})")
+    
+    if actual_size != expected_size:
+        print(f"[ERROR] Size mismatch! Padding/truncating to {expected_size}")
+        if actual_size < expected_size:
+            volume_flat = np.pad(volume_flat, (0, expected_size - actual_size), 'constant')
+        else:
+            volume_flat = volume_flat[:expected_size]
+    
+    # Encode as base64
+    volume_bytes = volume_flat.tobytes()
+    volume_b64 = base64.b64encode(volume_bytes).decode('utf-8')
+    
+    # Calculate spacing (assuming isotropic for now, can be enhanced)
+    spacing = [1.0, 1.0, 1.0]
+    
+    print(f"[OK] Volume data exported: {len(volume_b64)} bytes (base64)")
+    
+    return {
+        'data': volume_b64,
+        'dimensions': list(volume_normalized.shape),
+        'spacing': spacing,
+        'window_min': int(window_min),
+        'window_max': int(window_max),
+    }
+
 def hu_window(img):
     """
     HU windowing from the notebook:
@@ -350,7 +443,7 @@ def prep_tumor(img):
     return img[..., None]  # Add channel dimension
 
 def load_nii_file(file_bytes):
-    """Load .nii or .nii.gz file from bytes"""
+    """Load .nii or .nii.gz file from bytes and extract spacing"""
     if not HAS_NIBABEL:
         raise ImportError("nibabel not installed. Cannot load .nii files")
     
@@ -363,8 +456,15 @@ def load_nii_file(file_bytes):
         # Load with nibabel
         nii = nib.load(tmp_path)
         vol = nii.get_fdata()
+        
+        # Extract voxel spacing from header (pixdim)
+        # pixdim[1:4] contains x, y, z spacing in mm
+        header = nii.header
+        spacing = tuple(header.get_zooms()[:3])  # Get x, y, z spacing
+        
         print(f"[INFO] Loaded NIfTI volume: shape={vol.shape}, dtype={vol.dtype}")
-        return vol
+        print(f"[INFO] Voxel spacing (mm): {spacing}")
+        return vol, spacing
     finally:
         # Clean up temp file
         try:
@@ -464,6 +564,7 @@ def process_ct_slice(slice_data, z_idx, pancreas_model, tumor_model, use_context
     global accumulated_masks, current_volume_shape
     
     # Initialize accumulated masks if this is the first slice
+    # Use 256x256 as that's the resolution our models work with
     if accumulated_masks['pancreas'] is None and current_volume_shape is not None:
         depth = current_volume_shape[2]
         accumulated_masks['shape'] = (256, 256, depth)
@@ -471,7 +572,7 @@ def process_ct_slice(slice_data, z_idx, pancreas_model, tumor_model, use_context
         accumulated_masks['tumor'] = np.zeros((256, 256, depth), dtype=np.uint8)
         print(f"[INFO] Initialized 3D mask accumulation: shape={accumulated_masks['shape']}")
     
-    # Store masks at this slice index
+    # Store masks at this slice index (masks are already 256x256 from model output)
     if accumulated_masks['pancreas'] is not None:
         if results['pancreas_mask'] is not None:
             accumulated_masks['pancreas'][:, :, z_idx] = results['pancreas_mask']
@@ -564,12 +665,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_reset_context()
         elif self.path == '/generate_3d_model':
             self._handle_generate_3d_model()
+        elif self.path == '/generate_volume_data':
+            self._handle_generate_volume_data()
+        elif self.path == '/export_volume_mesh':
+            self._handle_export_volume_mesh()
         else:
             self.send_error(404)
     
     def _handle_load_nii(self):
         """Load .nii file and extract all slices"""
-        global current_volume, current_volume_shape, tumor_context, accumulated_masks
+        global current_volume, current_volume_shape, current_volume_spacing, tumor_context, accumulated_masks
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -578,12 +683,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             # Decode base64 file
             file_bytes = base64.b64decode(data['file'])
             
-            # Load NIfTI file
-            volume = load_nii_file(file_bytes)
+            # Load NIfTI file with spacing
+            volume, spacing = load_nii_file(file_bytes)
             
-            # Store volume globally for scan_slice endpoint
+            # Store volume and spacing globally for scan_slice endpoint
             current_volume = volume
             current_volume_shape = volume.shape
+            current_volume_spacing = spacing
             
             # Reset tumor context for new volume
             tumor_context.reset()
@@ -832,11 +938,29 @@ class RequestHandler(BaseHTTPRequestHandler):
             
             print("[INFO] Generating 3D model...")
             
+            # Calculate effective spacing for 256x256 masks
+            # If original volume was different size, scale the spacing accordingly
+            global current_volume_spacing, current_volume_shape
+            if current_volume_shape is not None:
+                # Scale spacing based on how much we resized to 256x256
+                orig_x, orig_y = current_volume_shape[0], current_volume_shape[1]
+                scale_x = orig_x / 256.0
+                scale_y = orig_y / 256.0
+                effective_spacing = (
+                    current_volume_spacing[0] * scale_x,
+                    current_volume_spacing[1] * scale_y,
+                    current_volume_spacing[2]  # Z spacing unchanged
+                )
+            else:
+                effective_spacing = current_volume_spacing
+            
+            print(f"[INFO] Using effective spacing: {effective_spacing}")
+            
             # Generate meshes using marching cubes
             gltf_bytes = generate_3d_mesh_from_masks({
                 'pancreas': accumulated_masks['pancreas'],
                 'tumor': accumulated_masks['tumor'],
-            })
+            }, spacing=effective_spacing)
             
             if gltf_bytes is None:
                 self.send_response(400)
@@ -887,6 +1011,203 @@ class RequestHandler(BaseHTTPRequestHandler):
                 'success': False,
                 'error': f'3D generation failed: {str(e)}'
             }
+            self.wfile.write(json.dumps(error_response).encode())
+    
+    def _handle_generate_volume_data(self):
+        """Generate volume data for volume rendering"""
+        global current_volume, accumulated_masks
+        try:
+            # Check if we have a loaded volume
+            if current_volume is None:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                error_response = {
+                    'success': False,
+                    'error': 'No NIfTI volume loaded. Please load a file first.'
+                }
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            print("[INFO] Generating volume data for rendering...")
+            
+            # Export volume data
+            volume_info = export_volume_data(current_volume, target_size=256)
+            
+            # Also generate meshes if available
+            model_url = None
+            if accumulated_masks['pancreas'] is not None:
+                print("[INFO] Also generating 3D meshes...")
+                try:
+                    # Calculate effective spacing
+                    global current_volume_spacing, current_volume_shape
+                    if current_volume_shape is not None:
+                        orig_x, orig_y = current_volume_shape[0], current_volume_shape[1]
+                        scale_x = orig_x / 256.0
+                        scale_y = orig_y / 256.0
+                        effective_spacing = (
+                            current_volume_spacing[0] * scale_x,
+                            current_volume_spacing[1] * scale_y,
+                            current_volume_spacing[2]
+                        )
+                    else:
+                        effective_spacing = current_volume_spacing
+                    
+                    gltf_bytes = generate_3d_mesh_from_masks({
+                        'pancreas': accumulated_masks['pancreas'],
+                        'tumor': accumulated_masks['tumor'],
+                    }, spacing=effective_spacing)
+                    
+                    if gltf_bytes is not None:
+                        # Save to temporary file
+                        import tempfile
+                        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.glb', dir=os.path.dirname(__file__))
+                        temp_file.write(gltf_bytes)
+                        temp_file.close()
+                        
+                        # Store the temp file path globally
+                        global _last_3d_model_path
+                        _last_3d_model_path = temp_file.name
+                        model_url = 'http://localhost:8765/model.glb'
+                        print(f"[OK] Meshes also generated: {len(gltf_bytes)} bytes")
+                except Exception as mesh_error:
+                    print(f"[WARNING] Failed to generate meshes: {mesh_error}")
+            
+            response = {
+                'success': True,
+                'volume_data': volume_info['data'],
+                'dimensions': volume_info['dimensions'],
+                'spacing': volume_info['spacing'],
+                'window_min': volume_info['window_min'],
+                'window_max': volume_info['window_max'],
+                'model_url': model_url,
+                'data_size_bytes': len(volume_info['data'])
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode())
+            
+            print(f"[OK] Volume data ready: {volume_info['dimensions']} @ {len(volume_info['data'])} bytes (base64)")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to generate volume data: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            error_response = {'success': False, 'error': str(e)}
+            self.wfile.write(json.dumps(error_response).encode())
+    
+    def _handle_export_volume_mesh(self):
+        """Export full CT volume as mesh for external viewing (Windows 3D Viewer)"""
+        global current_volume, current_volume_spacing
+        try:
+            # Check if we have a loaded volume
+            if current_volume is None:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                error_response = {
+                    'success': False,
+                    'error': 'No NIfTI volume loaded. Please load a file first.'
+                }
+                self.wfile.write(json.dumps(error_response).encode())
+                return
+            
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data)
+            
+            # Get parameters
+            threshold = data.get('threshold', 200)  # HU threshold for bone/tissue
+            downsample = data.get('downsample', 2)  # Downsample factor for performance
+            
+            print(f"[INFO] Exporting volume mesh with threshold={threshold}, downsample={downsample}...")
+            
+            try:
+                from skimage.measure import marching_cubes
+                import trimesh
+            except ImportError as e:
+                raise ImportError("Missing dependencies. Install: pip install scikit-image trimesh")
+            
+            # Downsample volume for performance
+            if downsample > 1:
+                volume_ds = current_volume[::downsample, ::downsample, ::downsample]
+                spacing_ds = tuple(s * downsample for s in current_volume_spacing)
+            else:
+                volume_ds = current_volume
+                spacing_ds = current_volume_spacing
+            
+            print(f"[INFO] Volume shape after downsampling: {volume_ds.shape}")
+            
+            # Apply marching cubes at threshold
+            print(f"[INFO] Running marching cubes algorithm...")
+            verts, faces, normals, _ = marching_cubes(
+                volume_ds,
+                level=threshold,
+                spacing=spacing_ds,
+                allow_degenerate=False
+            )
+            
+            print(f"[INFO] Generated mesh: {len(verts)} vertices, {len(faces)} faces")
+            
+            # Create mesh
+            mesh = trimesh.Trimesh(
+                vertices=verts,
+                faces=faces,
+                vertex_normals=normals
+            )
+            
+            # Set color (white/gray for bone)
+            mesh.visual.vertex_colors = np.tile([200, 200, 200, 255], (len(verts), 1))
+            
+            # Export as GLB
+            print("[INFO] Exporting to GLB format...")
+            scene = trimesh.Scene()
+            scene.add_geometry(mesh, node_name='ct_volume')
+            gltf_bytes = scene.export(file_type='glb')
+            
+            # Save to file in project directory
+            output_path = os.path.join(os.path.dirname(__file__), 'ct_volume_export.glb')
+            with open(output_path, 'wb') as f:
+                f.write(gltf_bytes)
+            
+            print(f"[OK] Volume mesh saved to: {output_path}")
+            print(f"[OK] File size: {len(gltf_bytes)} bytes")
+            print(f"[INFO] You can open this file in Windows 3D Viewer!")
+            
+            response = {
+                'success': True,
+                'file_path': output_path,
+                'vertices': len(verts),
+                'faces': len(faces),
+                'size_bytes': len(gltf_bytes),
+                'threshold': threshold,
+                'message': 'Volume mesh exported successfully. Open ct_volume_export.glb in Windows 3D Viewer.'
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode())
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to export volume mesh: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            error_response = {'success': False, 'error': str(e)}
             self.wfile.write(json.dumps(error_response).encode())
 
 def main():

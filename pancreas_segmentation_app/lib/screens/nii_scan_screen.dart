@@ -104,7 +104,7 @@ class _NiiScanScreenState extends State<NiiScanScreen> {
               CircularProgressIndicator(color: AppTheme.primaryBlue),
               SizedBox(height: 16),
               Text(
-                'Generating 3D model...',
+                'Generating 3D visualization...',
                 style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontSize: 16,
@@ -112,7 +112,7 @@ class _NiiScanScreenState extends State<NiiScanScreen> {
               ),
               SizedBox(height: 8),
               Text(
-                'This may take a moment',
+                'Processing volume data and meshes...',
                 style: TextStyle(
                   color: AppTheme.textSecondary,
                   fontSize: 12,
@@ -124,33 +124,34 @@ class _NiiScanScreenState extends State<NiiScanScreen> {
       ),
     );
     
-    // Generate 3D model
-    final gltfData = await service.generate3DModel();
+    // Generate volume viewer data (includes volume and meshes)
+    final volumeViewerData = await service.generateVolumeViewer();
     
-    print('Received gltfData from service: ${gltfData != null ? "YES" : "NO"}');
-    if (gltfData != null) {
-      print('gltfData length: ${gltfData.length}');
-      print('gltfData starts with: ${gltfData.substring(0, 50)}');
+    print('Received volumeViewerData from service: ${volumeViewerData != null ? "YES" : "NO"}');
+    if (volumeViewerData != null) {
+      print('Volume dimensions: ${volumeViewerData['dimensions']}');
+      print('Model URL: ${volumeViewerData['modelUrl'] != null ? "YES" : "NO"}');
     }
     
     if (!mounted) return;
     Navigator.pop(context); // Close loading dialog
     
-    if (gltfData != null) {
-      print('Opening Volume3DViewer dialog...');
+    if (volumeViewerData != null && volumeViewerData['modelUrl'] != null) {
+      print('Opening Volume3DViewer dialog with volume rendering...');
       // Show 3D viewer in fullscreen dialog
       showDialog(
         context: context,
         builder: (context) {
-          print('Building Volume3DViewer with data length: ${gltfData.length}');
+          print('Building Volume3DViewer with volume data');
           return Volume3DViewer(
-            gltfData: gltfData,
+            gltfData: volumeViewerData['modelUrl'] as String,
+            volumeData: volumeViewerData,
             onClose: () => Navigator.pop(context),
           );
         },
       );
     } else {
-      _showSnackBar('Failed to generate 3D model', isError: true);
+      _showSnackBar('Failed to generate 3D visualization', isError: true);
     }
   }
 
@@ -400,11 +401,11 @@ class _NiiScanScreenState extends State<NiiScanScreen> {
               Container(
                 padding: const EdgeInsets.all(16),
                 color: AppTheme.surfaceCard,
-                child: Row(
+                child: const Row(
                   children: [
-                    const Icon(Icons.layers, color: AppTheme.primaryBlue, size: 20),
-                    const SizedBox(width: 8),
-                    const Text(
+                    Icon(Icons.layers, color: AppTheme.primaryBlue, size: 20),
+                    SizedBox(width: 8),
+                    Text(
                       'Slice Navigator',
                       style: TextStyle(
                         color: AppTheme.textPrimary,

@@ -88,15 +88,15 @@ class ScanStatisticsPanel extends StatelessWidget {
                       width: 1,
                     ),
                   ),
-                  child: Row(
+                  child: const Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.priority_high,
                         color: Colors.orange,
                         size: 20,
                       ),
-                      const SizedBox(width: 8),
-                      const Expanded(
+                      SizedBox(width: 8),
+                      Expanded(
                         child: Text(
                           'AI-assisted detection: Requires clinical validation',
                           style: TextStyle(

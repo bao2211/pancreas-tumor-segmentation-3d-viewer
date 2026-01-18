@@ -7,7 +7,8 @@ This project is a **multi-platform medical imaging application** for detecting a
 ### Key Features
 - **Two-stage segmentation**: Pancreas detection → Tumor detection
 - **Context-aware prediction**: Temporal smoothing across slices for better tumor connectivity
-- **3D visualization**: Interactive 3D rendering of pancreas and tumor meshes
+- **3D visualization**: Interactive 3D rendering with volume rendering and mesh overlays
+- **Volume rendering**: Full CT scan visualization with transparency and HU-based color mapping
 - **Cross-platform**: Flutter web app with Python backend
 - **Professional UI**: Real-time statistics, model information, and clinical metrics
 
@@ -228,7 +229,69 @@ Reduces the number of triangles in a mesh while preserving its shape. Uses quadr
 
 ---
 
-### 6. NIfTI File Format
+### 6. Volume Rendering with Ray Marching
+
+**What it is:**
+A technique for directly visualizing 3D medical imaging data by casting rays through the volume and accumulating color/opacity values. Unlike surface rendering (marching cubes), volume rendering shows internal structures with transparency.
+
+**Why used:**
+- **Full body visualization**: Shows the entire CT scan, not just segmented structures
+- **Internal structure**: Reveals anatomy at different depths with transparency
+- **Flexible visualization**: HU-based transfer functions for different tissue types
+- **Context**: Provides anatomical context for segmented pancreas and tumor
+
+**How it works:**
+1. **3D Texture**: Volume data stored as 3D texture on GPU
+2. **Ray Marching**: Cast rays from camera through volume
+3. **Sampling**: Sample volume at regular intervals along each ray
+4. **Transfer Function**: Map HU values to RGBA (color + opacity)
+5. **Accumulation**: Blend colors using front-to-back alpha compositing
+6. **Early Termination**: Stop ray when opacity reaches threshold
+
+**Implementation Details:**
+
+**Volume Data Export (Python):**
+```python
+# Downsample to 256³ for performance
+# Apply HU windowing (-150 to 250 for soft tissue)
+# Normalize to 0-255 uint8
+# Encode as base64 for web transfer
+```
+
+**Three.js Shader (GLSL):**
+- Vertex shader: Pass position to fragment shader
+- Fragment shader: Implement ray marching algorithm
+- Transfer function: HU → color/opacity mapping
+- Supports 128-256 samples per ray
+
+**Transfer Function (Soft Tissue Preset):**
+- Air (< -150 HU): Transparent
+- Soft tissue (-150 to 50 HU): Brown, 20% opacity
+- Dense tissue (50 to 250 HU): Orange/tan, 30-50% opacity
+- Bone (> 400 HU): White, 50-80% opacity
+
+**UI Controls:**
+- **Volume opacity slider**: Overall transparency (0-1)
+- **Show/Hide toggle**: Turn volume rendering on/off
+- **Combined view**: Volume + segmented meshes overlay
+
+**Performance Optimizations:**
+- Downsample large volumes to 256³ max
+- Adaptive sampling rate (64-256 steps)
+- Early ray termination when opacity > 0.95
+- WebGL 2.0 Data3DTexture for efficient 3D texture access
+- Back-face culling and depth optimization
+
+**Learning Resources:**
+- **Volume Rendering**: https://en.wikipedia.org/wiki/Volume_rendering
+- **Ray Marching**: https://www.scratchapixel.com/lessons/3d-basic-rendering/volume-rendering-for-developers
+- **Three.js 3D Textures**: https://threejs.org/examples/#webgl2_materials_texture3d
+- **Medical Volume Rendering**: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3879793/
+- **Transfer Functions**: https://www.sci.utah.edu/~will/papers/tvcg01-preintegrated.pdf
+
+---
+
+### 7. NIfTI File Format
 
 **What it is:**
 Neuroimaging Informatics Technology Initiative format - standard for storing medical imaging data (CT, MRI, PET scans).
@@ -251,7 +314,7 @@ Neuroimaging Informatics Technology Initiative format - standard for storing med
 
 ---
 
-### 7. State Management: Provider Pattern
+### 8. State Management: Provider Pattern
 
 **What it is:**
 A Flutter state management pattern using the Provider package. Provides reactive state updates across the widget tree.
@@ -274,7 +337,7 @@ A Flutter state management pattern using the Provider package. Provides reactive
 
 ---
 
-### 8. RESTful API Design
+### 9. RESTful API Design
 
 **What it is:**
 Representational State Transfer (REST) architecture for client-server communication. Uses HTTP methods (GET, POST) and JSON responses.
@@ -290,7 +353,8 @@ Representational State Transfer (REST) architecture for client-server communicat
 - `POST /load_nii` - Upload and load NIfTI file
 - `POST /scan_slice` - Process single slice
 - `POST /scan_all` - Batch process all slices
-- `POST /generate_3d_model` - Generate 3D mesh
+- `POST /generate_3d_model` - Generate 3D mesh from segmentation masks
+- `POST /generate_volume_data` - Generate volume data + meshes for volume rendering
 - `GET /model.glb` - Download GLB file
 
 **Learning Resources:**
@@ -337,9 +401,10 @@ Representational State Transfer (REST) architecture for client-server communicat
 
 1. **Two-stage approach** improves accuracy by first localizing the organ, then detecting abnormalities
 2. **Context-aware processing** uses temporal information to create more consistent predictions
-3. **3D visualization** provides intuitive understanding of spatial relationships
-4. **Cross-platform design** enables deployment on multiple devices
-5. **Medical imaging** requires specialized preprocessing (HU windowing, NIfTI handling)
+3. **Hybrid 3D visualization** combines volume rendering (full CT scan) with surface meshes (segmented structures)
+4. **Volume rendering with ray marching** enables interactive exploration of internal anatomy
+5. **Cross-platform design** enables deployment on multiple devices
+6. **Medical imaging** requires specialized preprocessing (HU windowing, NIfTI handling)
 
 ---
 
