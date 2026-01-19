@@ -252,6 +252,8 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
     let directionalLight, ambientLight;
     let volumeMesh = null;
     let volumeData = null;
+    let pancreasVolumeMesh = null;
+    let tumorVolumeMesh = null;
     
     // Volume rendering shaders (GLSL ES 3.00 for WebGL 2.0)
     // Note: Do NOT add #version directive - Three.js handles it via glslVersion parameter
@@ -382,6 +384,96 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
       }
     `;
     
+    // Segmentation volume shaders (for pancreas and tumor)
+    const segmentationVertexShader = `
+      out vec3 vWorldPosition;
+      out vec3 vLocalPosition;
+      
+      void main() {
+        vLocalPosition = position;
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `;
+    
+    const segmentationFragmentShader = `
+      precision highp float;
+      precision highp sampler3D;
+      
+      uniform sampler3D segmentationTexture;
+      uniform vec3 cameraPos;
+      uniform float opacity;
+      uniform vec3 segmentColor;
+      
+      in vec3 vWorldPosition;
+      in vec3 vLocalPosition;
+      
+      out vec4 fragColor;
+      
+      // Ray-box intersection
+      vec2 rayBoxIntersection(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax) {
+        vec3 invDir = 1.0 / rayDir;
+        vec3 tMin = (boxMin - rayOrigin) * invDir;
+        vec3 tMax = (boxMax - rayOrigin) * invDir;
+        vec3 t1 = min(tMin, tMax);
+        vec3 t2 = max(tMin, tMax);
+        float tNear = max(max(t1.x, t1.y), t1.z);
+        float tFar = min(min(t2.x, t2.y), t2.z);
+        return vec2(tNear, tFar);
+      }
+      
+      void main() {
+        // Ray from camera through fragment
+        vec3 rayDir = normalize(vWorldPosition - cameraPos);
+        vec3 rayOrigin = vLocalPosition;
+        
+        // Intersect with volume box
+        vec3 boxMin = vec3(-0.5);
+        vec3 boxMax = vec3(0.5);
+        vec2 tHit = rayBoxIntersection(rayOrigin, rayDir, boxMin, boxMax);
+        
+        if (tHit.x > tHit.y || tHit.y < 0.0) {
+          discard;
+        }
+        
+        tHit.x = max(tHit.x, 0.0);
+        
+        // Ray marching with more steps for sparse segmentation data
+        vec3 rayStart = rayOrigin + rayDir * tHit.x;
+        vec3 rayEnd = rayOrigin + rayDir * tHit.y;
+        float rayLength = distance(rayStart, rayEnd);
+        
+        int numSteps = 256;  // Increased from 128 to 256 for better sampling
+        float stepSize = rayLength / float(numSteps);
+        
+        vec4 color = vec4(0.0);
+        
+        for (int i = 0; i < numSteps; i++) {
+          vec3 samplePos = rayStart + rayDir * (float(i) * stepSize);
+          vec3 texCoord = samplePos + 0.5;
+          
+          // Sample segmentation mask (binary: 0 or 1)
+          float mask = texture(segmentationTexture, texCoord).r;
+          
+          if (mask > 0.001) {  // Very low threshold to catch any non-zero voxels
+            // Hit the segmentation - use solid color with brightness based on mask value
+            float alpha = opacity * mask * 255.0;  // Scale up if mask values are 0-1 range
+            alpha = min(alpha, 1.0);  // Clamp to max 1.0
+            vec3 rgb = segmentColor;
+            
+            // Front-to-back compositing
+            color.rgb += (1.0 - color.a) * alpha * rgb;
+            color.a += (1.0 - color.a) * alpha;
+            
+            if (color.a > 0.95) break;
+          }
+        }
+        
+        fragColor = color;
+      }
+    `;
+    
     // Initialize Three.js
     function initThreeJS() {
       console.log('Initializing Three.js...');
@@ -456,13 +548,65 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
         modelGroup.rotation.y += 0.005;
       }
       
-      // Update camera position in volume shader
+      // Update camera position in volume shaders
       if (volumeMesh && volumeMesh.material.uniforms) {
         volumeMesh.material.uniforms.cameraPos.value.copy(camera.position);
       }
       
+      if (pancreasVolumeMesh && pancreasVolumeMesh.material.uniforms) {
+        pancreasVolumeMesh.material.uniforms.cameraPos.value.copy(camera.position);
+      }
+      
+      if (tumorVolumeMesh && tumorVolumeMesh.material.uniforms) {
+        tumorVolumeMesh.material.uniforms.cameraPos.value.copy(camera.position);
+      }
+      
       controls.update();
       renderer.render(scene, camera);
+    }
+    
+    // Function to create segmentation volume texture
+    function createSegmentationTexture(base64Data, dimensions) {
+      console.log('Creating segmentation texture...');
+      console.log('Dimensions:', dimensions);
+      
+      const binaryString = atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      let nonZero = 0;
+      let maxVal = 0;
+      let minNonZero = 255;
+      for (let i = 0; i < bytes.length; i++) {
+        if (bytes[i] > 0) {
+          nonZero++;
+          maxVal = Math.max(maxVal, bytes[i]);
+          minNonZero = Math.min(minNonZero, bytes[i]);
+        }
+      }
+      console.log(`Non-zero voxels: \${nonZero} / \${bytes.length} (\${(nonZero/bytes.length*100).toFixed(2)}%)`);
+      console.log(`Value range: 0 to \${maxVal}, min non-zero: \${minNonZero}`);
+      
+      const texture = new THREE.DataTexture3D(
+        bytes,
+        dimensions[0],
+        dimensions[1],
+        dimensions[2]
+      );
+      
+      texture.format = THREE.RedFormat;
+      texture.type = THREE.UnsignedByteType;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.wrapR = THREE.ClampToEdgeWrapping;
+      texture.unpackAlignment = 1;
+      texture.needsUpdate = true;
+      
+      return texture;
     }
     
     function loadGLBModel(url) {
@@ -665,11 +809,113 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
       console.log('Model group scale:', modelGroup.scale);
     }
     
+    // Visualize detected regions with debug markers
+    function visualizeDetectedRegions(regions, volumeScale, dimensions) {
+      if (!regions || regions.length === 0) {
+        console.log('No detected regions to visualize');
+        return;
+      }
+      
+      console.log(`🎯 Visualizing \${regions.length} detected regions`);
+      
+      // Remove previous markers if any
+      const previousMarkers = scene.children.filter(obj => obj.name && obj.name.startsWith('region_marker_'));
+      previousMarkers.forEach(marker => scene.remove(marker));
+      
+      regions.forEach((region, idx) => {
+        // Convert voxel coordinates to normalized coordinates [-0.5, 0.5]
+        const normalizedX = (region.centroid_voxel[0] / dimensions[0]) - 0.5;
+        const normalizedY = (region.centroid_voxel[1] / dimensions[1]) - 0.5;
+        const normalizedZ = (region.centroid_voxel[2] / dimensions[2]) - 0.5;
+        
+        // Apply volume scale to get scene coordinates
+        const sceneX = normalizedX * volumeScale.x;
+        const sceneY = normalizedY * volumeScale.y;
+        const sceneZ = normalizedZ * volumeScale.z;
+        
+        // Create sphere marker
+        const markerGeometry = new THREE.SphereGeometry(0.1, 16, 16);
+        const markerColor = region.type === 'pancreas' ? 0x00FFFF : 0xFF0000; // Cyan for pancreas, red for tumor
+        const markerMaterial = new THREE.MeshBasicMaterial({
+          color: markerColor,
+          transparent: true,
+          opacity: 0.8
+        });
+        
+        const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+        marker.position.set(sceneX, sceneY, sceneZ);
+        marker.name = `region_marker_\${idx}_\${region.type}`;
+        scene.add(marker);
+        
+        console.log(`  Marker \${idx} (\${region.type}):`, {
+          voxel: region.centroid_voxel,
+          normalized: [normalizedX, normalizedY, normalizedZ],
+          scene: [sceneX, sceneY, sceneZ],
+          physical_mm: region.centroid_physical
+        });
+        
+        // Create bounding box wireframe if bbox available
+        if (region.bbox_voxel) {
+          const bbox = region.bbox_voxel;
+          
+          // Calculate bbox dimensions in normalized coordinates
+          const bboxMinX = (bbox.min[0] / dimensions[0]) - 0.5;
+          const bboxMinY = (bbox.min[1] / dimensions[1]) - 0.5;
+          const bboxMinZ = (bbox.min[2] / dimensions[2]) - 0.5;
+          const bboxMaxX = (bbox.max[0] / dimensions[0]) - 0.5;
+          const bboxMaxY = (bbox.max[1] / dimensions[1]) - 0.5;
+          const bboxMaxZ = (bbox.max[2] / dimensions[2]) - 0.5;
+          
+          const bboxWidth = (bboxMaxX - bboxMinX) * volumeScale.x;
+          const bboxHeight = (bboxMaxY - bboxMinY) * volumeScale.y;
+          const bboxDepth = (bboxMaxZ - bboxMinZ) * volumeScale.z;
+          
+          const bboxCenterX = ((bboxMinX + bboxMaxX) / 2) * volumeScale.x;
+          const bboxCenterY = ((bboxMinY + bboxMaxY) / 2) * volumeScale.y;
+          const bboxCenterZ = ((bboxMinZ + bboxMaxZ) / 2) * volumeScale.z;
+          
+          const bboxGeometry = new THREE.BoxGeometry(bboxWidth, bboxHeight, bboxDepth);
+          const bboxMaterial = new THREE.MeshBasicMaterial({
+            color: markerColor,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.5
+          });
+          
+          const bboxMesh = new THREE.Mesh(bboxGeometry, bboxMaterial);
+          bboxMesh.position.set(bboxCenterX, bboxCenterY, bboxCenterZ);
+          bboxMesh.name = `region_bbox_\${idx}_\${region.type}`;
+          scene.add(bboxMesh);
+        }
+      });
+      
+      console.log('✅ Region markers added to scene');
+    }
+    
     // Load volume data as 3D texture
     function loadVolumeData(volumeInfo) {
       console.log('Loading volume data...', volumeInfo);
       
-      const { volume_data, dimensions, spacing, window_min, window_max } = volumeInfo;
+      const { volume_data, dimensions, spacing, window_min, window_max, spatial_metadata } = volumeInfo;
+      
+      // Log spatial metadata if available
+      if (spatial_metadata) {
+        console.log('📍 Spatial Metadata Available:');
+        console.log('  Original affine matrix:', spatial_metadata.original_affine);
+        console.log('  Original spacing (mm):', spatial_metadata.original_spacing);
+        console.log('  Original shape:', spatial_metadata.original_shape);
+        console.log('  Original origin:', spatial_metadata.original_origin);
+        console.log('  Resampling transform:', spatial_metadata.resampling_transform);
+        console.log('  Detected regions:', spatial_metadata.detected_regions ? spatial_metadata.detected_regions.length : 0);
+        
+        if (spatial_metadata.detected_regions) {
+          spatial_metadata.detected_regions.forEach((region, idx) => {
+            console.log(`  Region \${idx}: \${region.type} at slice \${region.slice_idx}`);
+            console.log(`    Centroid (physical mm):`, region.centroid_physical);
+            console.log(`    Voxel count:`, region.voxel_count);
+          });
+        }
+      }
       
       if (!volume_data || !dimensions) {
         console.error('Invalid volume data');
@@ -756,14 +1002,36 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
         volumeMesh = new THREE.Mesh(volumeGeometry, volumeMaterial);
         volumeMesh.name = 'volumeMesh';
         
-        // Use uniform scale to make it a cube (256x256x256 conceptually)
-        // Scale to about 6 units to match the segmented meshes
-        const uniformScale = 6;
+        // Calculate scale based on physical spacing if spatial_metadata available
+        let scaleX, scaleY, scaleZ;
+        let baseScale = 6; // Base scale for visualization
         
-        console.log('Volume dimensions:', dimensions);
-        console.log('Using uniform scale:', uniformScale, 'for cubic volume');
+        if (spatial_metadata && spatial_metadata.resampling_transform) {
+          // Use physical spacing after resampling to maintain correct proportions
+          const physicalSpacing = spatial_metadata.resampling_transform.new_spacing;
+          console.log('🎯 Using physical spacing for anatomically correct scale:', physicalSpacing);
+          
+          // Calculate physical dimensions in mm
+          const physicalDimX = dimensions[0] * physicalSpacing[0];
+          const physicalDimY = dimensions[1] * physicalSpacing[1];
+          const physicalDimZ = dimensions[2] * physicalSpacing[2];
+          
+          console.log('Physical dimensions (mm):', [physicalDimX, physicalDimY, physicalDimZ]);
+          
+          // Normalize to largest dimension and scale
+          const maxDim = Math.max(physicalDimX, physicalDimY, physicalDimZ);
+          scaleX = (physicalDimX / maxDim) * baseScale;
+          scaleY = (physicalDimY / maxDim) * baseScale;
+          scaleZ = (physicalDimZ / maxDim) * baseScale;
+          
+          console.log('Anatomically correct scale factors:', [scaleX, scaleY, scaleZ]);
+        } else {
+          // Fallback to uniform scale if no spatial metadata
+          console.log('⚠️ No spatial metadata, using uniform scale');
+          scaleX = scaleY = scaleZ = baseScale;
+        }
         
-        volumeMesh.scale.set(uniformScale, uniformScale, uniformScale);
+        volumeMesh.scale.set(scaleX, scaleY, scaleZ);
         volumeMesh.position.set(0, 0, 0);
         
         scene.add(volumeMesh);
@@ -777,7 +1045,7 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
           opacity: 0.2
         });
         const wireframeMesh = new THREE.Mesh(wireframeGeo, wireframeMat);
-        wireframeMesh.scale.set(uniformScale, uniformScale, uniformScale);
+        wireframeMesh.scale.set(scaleX, scaleY, scaleZ);
         wireframeMesh.position.set(0, 0, 0);
         wireframeMesh.name = 'volumeWireframe';
         scene.add(wireframeMesh);
@@ -785,10 +1053,11 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
         console.log('✅ Volume mesh added to scene at origin');
         console.log('Volume mesh scale:', volumeMesh.scale);
         console.log('Volume mesh position:', volumeMesh.position);
-        console.log('✅ Wireframe helper added (green cube) - uniform 256x256x256');
+        console.log('✅ Wireframe helper added (green cube) with physical proportions');
         
         // Store volume scale for model matching
-        window.volumeUniformScale = uniformScale;
+        window.volumeScale = { x: scaleX, y: scaleY, z: scaleZ };
+        window.volumeUniformScale = baseScale; // Keep for backward compatibility
         
         // If model already loaded, scale it now
         if (modelGroup && window.modelOriginalBounds && window.loadedModel) {
@@ -798,6 +1067,15 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
         
         // Store volume data for controls
         volumeData = { texture, material: volumeMaterial, dimensions, window_min, window_max };
+        
+        // Visualize detected regions if available
+        if (spatial_metadata && spatial_metadata.detected_regions && spatial_metadata.detected_regions.length > 0) {
+          visualizeDetectedRegions(
+            spatial_metadata.detected_regions,
+            { x: scaleX, y: scaleY, z: scaleZ },
+            dimensions
+          );
+        }
         
         // Show volume controls
         document.getElementById('volumeControls').style.display = 'flex';
@@ -813,28 +1091,200 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
         console.log('Received model data via postMessage');
         console.log('Event data keys:', Object.keys(event.data));
         
-        // Get the model data URL from the message
-        const modelDataUrl = event.data.modelData;
-        
-        if (!modelDataUrl) {
-          console.error('❌ No modelData in message!');
-          loading.innerHTML = '<div style="color: #EF4444;">❌ No model data received</div>';
-          return;
+        // Check if volume data includes segmentation volumes
+        if (event.data.volumeData && event.data.volumeData.segmentation_format === 'volume') {
+          console.log('✅ Loading volume-based segmentation from volumeData');
+          console.log('Segmentation dimensions:', event.data.volumeData.segmentation_dimensions);
+          console.log('Pancreas voxels:', event.data.volumeData.pancreas_voxel_count);
+          console.log('Tumor voxels:', event.data.volumeData.tumor_voxel_count);
+          
+          // Calculate scale factors from spatial metadata
+          let segScaleX = 6, segScaleY = 6, segScaleZ = 6; // Default uniform scale
+          
+          if (event.data.volumeData.spatial_metadata && event.data.volumeData.spatial_metadata.resampling_transform) {
+            const physicalSpacing = event.data.volumeData.spatial_metadata.resampling_transform.new_spacing;
+            const segDims = event.data.volumeData.segmentation_dimensions;
+            
+            const physicalDimX = segDims[0] * physicalSpacing[0];
+            const physicalDimY = segDims[1] * physicalSpacing[1];
+            const physicalDimZ = segDims[2] * physicalSpacing[2];
+            
+            const maxDim = Math.max(physicalDimX, physicalDimY, physicalDimZ);
+            segScaleX = (physicalDimX / maxDim) * 6;
+            segScaleY = (physicalDimY / maxDim) * 6;
+            segScaleZ = (physicalDimZ / maxDim) * 6;
+            
+            console.log('🎯 Segmentation volumes using physical scale:', [segScaleX, segScaleY, segScaleZ]);
+          }
+          
+          // Create pancreas volume
+          const pancreasTexture = createSegmentationTexture(
+            event.data.volumeData.pancreas_volume,
+            event.data.volumeData.segmentation_dimensions
+          );
+          
+          const pancreasMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              segmentationTexture: { value: pancreasTexture },
+              cameraPos: { value: camera.position },
+              opacity: { value: 1.0 },
+              segmentColor: { value: new THREE.Vector3(0.0, 1.0, 1.0) } // Cyan
+            },
+            vertexShader: segmentationVertexShader,
+            fragmentShader: segmentationFragmentShader,
+            side: THREE.DoubleSide,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.NormalBlending,
+            glslVersion: THREE.GLSL3
+          });
+          
+          const pancreasGeometry = new THREE.BoxGeometry(1, 1, 1);
+          pancreasVolumeMesh = new THREE.Mesh(pancreasGeometry, pancreasMaterial);
+          pancreasVolumeMesh.name = 'pancreas_volume';
+          pancreasVolumeMesh.scale.set(segScaleX, segScaleY, segScaleZ);
+          pancreasVolumeMesh.position.set(0, 0, 0);
+          scene.add(pancreasVolumeMesh);
+          
+          // Create tumor volume
+          const tumorTexture = createSegmentationTexture(
+            event.data.volumeData.tumor_volume,
+            event.data.volumeData.segmentation_dimensions
+          );
+          
+          const tumorMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              segmentationTexture: { value: tumorTexture },
+              cameraPos: { value: camera.position },
+              opacity: { value: 1.0 },
+              segmentColor: { value: new THREE.Vector3(1.0, 0.0, 0.0) } // Red
+            },
+            vertexShader: segmentationVertexShader,
+            fragmentShader: segmentationFragmentShader,
+            side: THREE.DoubleSide,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.NormalBlending,
+            glslVersion: THREE.GLSL3
+          });
+          
+          const tumorGeometry = new THREE.BoxGeometry(1, 1, 1);
+          tumorVolumeMesh = new THREE.Mesh(tumorGeometry, tumorMaterial);
+          tumorVolumeMesh.name = 'tumor_volume';
+          tumorVolumeMesh.scale.set(segScaleX, segScaleY, segScaleZ);
+          tumorVolumeMesh.position.set(0, 0, 0);
+          scene.add(tumorVolumeMesh);
+          
+          console.log('✅ Segmentation volumes added to scene with physical proportions');
+          
+          // Load CT volume
+          if (event.data.volumeData) {
+            console.log('✅ Volume data included, loading...');
+            loadVolumeData(event.data.volumeData);
+          }
+          
+          // Hide loading
+          loading.style.display = 'none';
         }
-        
-        console.log('Model data URL type:', typeof modelDataUrl);
-        console.log('Model data URL starts with:', modelDataUrl.substring(0, 100));
-        
-        // Load the GLB model from data URL
-        loadGLBModel(modelDataUrl);
-        
-        // Check if volume data is included
-        if (event.data.volumeData) {
-          console.log('✅ Volume data included, loading...');
-          console.log('Volume data keys:', Object.keys(event.data.volumeData));
-          loadVolumeData(event.data.volumeData);
-        } else {
-          console.log('⚠️ No volume data in message');
+        // Fallback: Check if modelData has volume format
+        else if (event.data.modelData && typeof event.data.modelData === 'object' && event.data.modelData.format === 'volume') {
+          console.log('✅ Loading volume-based segmentation from modelData');
+          console.log('Dimensions:', event.data.modelData.dimensions);
+          console.log('Pancreas voxels:', event.data.modelData.pancreas_voxel_count);
+          console.log('Tumor voxels:', event.data.modelData.tumor_voxel_count);
+          
+          // Create pancreas volume
+          const pancreasTexture = createSegmentationTexture(
+            event.data.modelData.pancreas_volume,
+            event.data.modelData.dimensions
+          );
+          
+          const pancreasMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              segmentationTexture: { value: pancreasTexture },
+              cameraPos: { value: camera.position },
+              opacity: { value: 1.0 },
+              segmentColor: { value: new THREE.Vector3(0.0, 1.0, 1.0) } // Cyan
+            },
+            vertexShader: segmentationVertexShader,
+            fragmentShader: segmentationFragmentShader,
+            side: THREE.DoubleSide,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.NormalBlending,
+            glslVersion: THREE.GLSL3
+          });
+          
+          const pancreasGeometry = new THREE.BoxGeometry(6, 6, 6);
+          pancreasVolumeMesh = new THREE.Mesh(pancreasGeometry, pancreasMaterial);
+          pancreasVolumeMesh.name = 'pancreas_volume';
+          pancreasVolumeMesh.position.set(0, 0, 0);
+          scene.add(pancreasVolumeMesh);
+          
+          // Create tumor volume
+          const tumorTexture = createSegmentationTexture(
+            event.data.modelData.tumor_volume,
+            event.data.modelData.dimensions
+          );
+          
+          const tumorMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+              segmentationTexture: { value: tumorTexture },
+              cameraPos: { value: camera.position },
+              opacity: { value: 1.0 },
+              segmentColor: { value: new THREE.Vector3(1.0, 0.0, 0.0) } // Red
+            },
+            vertexShader: segmentationVertexShader,
+            fragmentShader: segmentationFragmentShader,
+            side: THREE.DoubleSide,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.NormalBlending,
+            glslVersion: THREE.GLSL3
+          });
+          
+          const tumorGeometry = new THREE.BoxGeometry(6, 6, 6);
+          tumorVolumeMesh = new THREE.Mesh(tumorGeometry, tumorMaterial);
+          tumorVolumeMesh.name = 'tumor_volume';
+          tumorVolumeMesh.position.set(0, 0, 0);
+          scene.add(tumorVolumeMesh);
+          
+          console.log('✅ Segmentation volumes added to scene');
+          
+          // Hide loading
+          loading.style.display = 'none';
+          
+          // Load CT volume if provided
+          if (event.data.volumeData) {
+            console.log('✅ Volume data included, loading...');
+            loadVolumeData(event.data.volumeData);
+          }
+        }
+        // Fallback to mesh-based (old method)
+        else {
+          const modelDataUrl = typeof event.data.modelData === 'string' ? event.data.modelData : (event.data.modelData?.glb_fallback || event.data.modelData);
+          
+          if (!modelDataUrl) {
+            console.error('❌ No modelData in message!');
+            loading.innerHTML = '<div style="color: #EF4444;">❌ No model data received</div>';
+            return;
+          }
+          
+          console.log('⚠️ Using mesh fallback');
+          console.log('Model data URL type:', typeof modelDataUrl);
+          console.log('Model data URL starts with:', modelDataUrl.substring(0, 100));
+          
+          // Load the GLB model from data URL
+          loadGLBModel(modelDataUrl);
+          
+          // Check if volume data is included
+          if (event.data.volumeData) {
+            console.log('✅ Volume data included, loading...');
+            console.log('Volume data keys:', Object.keys(event.data.volumeData));
+            loadVolumeData(event.data.volumeData);
+          } else {
+            console.log('⚠️ No volume data in message');
+          }
         }
       }
     });
@@ -881,6 +1331,34 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
     });
     
     function focusOnSegmentation() {
+      // Check if volume-based segmentations exist
+      if (pancreasVolumeMesh || tumorVolumeMesh) {
+        console.log('Focusing on volume-based segmentation');
+        
+        // Since volumes are aligned, just zoom to the 6x6x6 cube center
+        camera.position.set(4, 3, 4);
+        camera.lookAt(0, 0, 0);
+        controls.target.set(0, 0, 0);
+        controls.minDistance = 2;
+        controls.maxDistance = 15;
+        controls.update();
+        
+        // Make CT volume very transparent to see segmentation better
+        if (volumeMesh && volumeMesh.material.uniforms) {
+          volumeMesh.material.uniforms.opacity.value = 0.05;
+          const opacitySlider = document.getElementById('volumeOpacity');
+          const opacityValue = document.getElementById('volumeOpacityValue');
+          if (opacitySlider && opacityValue) {
+            opacitySlider.value = 0.05;
+            opacityValue.textContent = '0.05';
+          }
+        }
+        
+        console.log('✅ Focused on volume-based segmentation');
+        return;
+      }
+      
+      // Fallback to mesh-based segmentation
       if (!modelGroup) {
         console.log('No segmentation model loaded yet');
         alert('Please wait for the pancreas and tumor models to load first.');

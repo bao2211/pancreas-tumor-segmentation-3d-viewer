@@ -385,6 +385,19 @@ class NiiService extends ChangeNotifier {
         'window_max': data['window_max'],
       };
       
+      // Include segmentation volume data if available
+      if (data['segmentation_format'] == 'volume') {
+        result['segmentation_format'] = data['segmentation_format'];
+        result['segmentation_dimensions'] = data['segmentation_dimensions'];
+        result['pancreas_volume'] = data['pancreas_volume'];
+        result['tumor_volume'] = data['tumor_volume'];
+        result['pancreas_voxel_count'] = data['pancreas_voxel_count'];
+        result['tumor_voxel_count'] = data['tumor_voxel_count'];
+        debugPrint('✅ Segmentation volumes included in result');
+        debugPrint('Pancreas voxels: ${data['pancreas_voxel_count']}');
+        debugPrint('Tumor voxels: ${data['tumor_voxel_count']}');
+      }
+      
       // If model URL is provided, fetch the GLB file
       if (data['model_url'] != null) {
         final modelUrl = data['model_url'] as String;

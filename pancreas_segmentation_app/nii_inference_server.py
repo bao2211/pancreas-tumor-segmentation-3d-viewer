@@ -43,6 +43,8 @@ tumor_model = None
 current_volume = None  # Store loaded NIfTI volume for scanning
 current_volume_shape = None  # Shape of the current volume
 current_volume_spacing = (1.0, 1.0, 1.0)  # Store voxel spacing from NIfTI header
+current_volume_affine = None  # Store affine transformation matrix
+current_volume_origin = None  # Store origin point
 
 # Global storage for 3D masks (for 3D visualization)
 accumulated_masks = {
@@ -51,8 +53,14 @@ accumulated_masks = {
     'shape': None,
 }
 
+# Global storage for detected regions with coordinates
+detected_regions = []
+
 # Global storage for last generated 3D model path
 _last_3d_model_path = None
+
+# Track all generated temporary GLB files for cleanup
+_temp_glb_files = []
 
 # Context-aware prediction system
 class TumorContext:
@@ -387,8 +395,13 @@ def export_volume_data(volume, target_size=256):
     volume_normalized = ((volume_windowed - window_min) / (window_max - window_min) * 255).astype(np.uint8)
     
     print(f"[INFO] Volume normalized to uint8, shape: {volume_normalized.shape}")
+    print(f"[INFO] Shape interpretation: (Height={volume_normalized.shape[0]}, Width={volume_normalized.shape[1]}, Depth={volume_normalized.shape[2]})")
     print(f"[INFO] Value range: {volume_normalized.min()} to {volume_normalized.max()}")
     print(f"[INFO] Sample values at center: {volume_normalized[target_size//2, target_size//2, target_size//2-5:target_size//2+5]}")
+    
+    # Debug: Check for non-zero voxels in different regions
+    total_nonzero = np.sum(volume_normalized > 0)
+    print(f"[DEBUG] CT volume non-zero voxels: {total_nonzero} / {volume_normalized.size} ({100*total_nonzero/volume_normalized.size:.1f}%)")
     
     # Flatten to 1D array in C-order (row-major)
     volume_flat = volume_normalized.flatten('C')
@@ -413,6 +426,7 @@ def export_volume_data(volume, target_size=256):
     spacing = [1.0, 1.0, 1.0]
     
     print(f"[OK] Volume data exported: {len(volume_b64)} bytes (base64)")
+    print(f"[OK] Axis order maintained: (Height, Width, Depth) → Flattened C-order")
     
     return {
         'data': volume_b64,
@@ -443,7 +457,7 @@ def prep_tumor(img):
     return img[..., None]  # Add channel dimension
 
 def load_nii_file(file_bytes):
-    """Load .nii or .nii.gz file from bytes and extract spacing"""
+    """Load .nii or .nii.gz file from bytes and extract spacing and spatial metadata"""
     if not HAS_NIBABEL:
         raise ImportError("nibabel not installed. Cannot load .nii files")
     
@@ -462,15 +476,124 @@ def load_nii_file(file_bytes):
         header = nii.header
         spacing = tuple(header.get_zooms()[:3])  # Get x, y, z spacing
         
+        # Extract affine transformation matrix (voxel to physical coordinates)
+        affine = nii.affine
+        origin = affine[:3, 3]  # Translation component (origin in physical space)
+        
         print(f"[INFO] Loaded NIfTI volume: shape={vol.shape}, dtype={vol.dtype}")
         print(f"[INFO] Voxel spacing (mm): {spacing}")
-        return vol, spacing
+        print(f"[INFO] Origin (mm): {origin}")
+        print(f"[INFO] Affine matrix shape: {affine.shape}")
+        
+        return vol, spacing, affine, origin
     finally:
         # Clean up temp file
         try:
             os.unlink(tmp_path)
         except:
             pass
+
+def cleanup_temp_glb_files():
+    """Remove all tracked temporary GLB files"""
+    global _temp_glb_files
+    removed_count = 0
+    for file_path in _temp_glb_files:
+        try:
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+                removed_count += 1
+                print(f"[CLEANUP] Removed: {os.path.basename(file_path)}")
+        except Exception as e:
+            print(f"[WARNING] Failed to remove {file_path}: {e}")
+    
+    _temp_glb_files.clear()
+    if removed_count > 0:
+        print(f"[OK] Cleaned up {removed_count} temporary GLB file(s)")
+
+def voxel_to_physical(voxel_coords, affine, as_array=False):
+    """Convert voxel coordinates to physical (mm) coordinates using affine matrix"""
+    if affine is None:
+        return voxel_coords
+    
+    # Convert to homogeneous coordinates
+    if isinstance(voxel_coords, (list, tuple)):
+        voxel_coords = np.array(voxel_coords)
+    
+    # Add 1 for homogeneous coordinates
+    voxel_homogeneous = np.append(voxel_coords, 1)
+    
+    # Apply affine transformation
+    physical = affine @ voxel_homogeneous
+    
+    if as_array:
+        return physical[:3]
+    # Convert numpy types to native Python floats for JSON serialization
+    return [float(x) for x in physical[:3]]
+
+def calculate_resampling_transform(original_shape, target_shape, original_spacing):
+    """Calculate transformation parameters when resampling volume"""
+    scale_factors = [
+        target_shape[i] / original_shape[i] 
+        for i in range(3)
+    ]
+    
+    # New voxel spacing after resampling
+    new_spacing = [
+        original_spacing[i] / scale_factors[i]
+        for i in range(3)
+    ]
+    
+    return {
+        'scale_factors': scale_factors,
+        'new_spacing': new_spacing,
+        'original_shape': list(original_shape),
+        'target_shape': list(target_shape)
+    }
+
+def extract_region_coordinates(mask, z_idx, affine=None, spacing=None):
+    """Extract bounding box and centroid from a 2D mask"""
+    if mask is None or not np.any(mask > 0):
+        return None
+    
+    # Get coordinates of non-zero voxels
+    coords = np.where(mask > 0)
+    y_coords, x_coords = coords[0], coords[1]
+    
+    # Bounding box in voxel space
+    bbox_voxel = {
+        'x_min': int(x_coords.min()),
+        'x_max': int(x_coords.max()),
+        'y_min': int(y_coords.min()),
+        'y_max': int(y_coords.max()),
+        'z': int(z_idx)
+    }
+    
+    # Centroid in voxel space
+    centroid_voxel = [
+        float(x_coords.mean()),
+        float(y_coords.mean()),
+        float(z_idx)
+    ]
+    
+    result = {
+        'bbox_voxel': bbox_voxel,
+        'centroid_voxel': centroid_voxel,
+        'voxel_count': int(len(x_coords))
+    }
+    
+    # Convert to physical coordinates if affine available
+    if affine is not None:
+        # Centroid in physical space
+        result['centroid_physical'] = voxel_to_physical(centroid_voxel, affine, as_array=False)
+        
+        # Bounding box corners in physical space
+        bbox_physical = {
+            'min': voxel_to_physical([bbox_voxel['x_min'], bbox_voxel['y_min'], bbox_voxel['z']], affine, as_array=False),
+            'max': voxel_to_physical([bbox_voxel['x_max'], bbox_voxel['y_max'], bbox_voxel['z']], affine, as_array=False)
+        }
+        result['bbox_physical'] = bbox_physical
+    
+    return result
 
 def process_ct_slice(slice_data, z_idx, pancreas_model, tumor_model, use_context=True):
     """
@@ -561,7 +684,7 @@ def process_ct_slice(slice_data, z_idx, pancreas_model, tumor_model, use_context
             tumor_context.add_prediction(z_idx, None)
     
     # === ACCUMULATE MASKS FOR 3D VISUALIZATION ===
-    global accumulated_masks, current_volume_shape
+    global accumulated_masks, current_volume_shape, detected_regions, current_volume_affine
     
     # Initialize accumulated masks if this is the first slice
     # Use 256x256 as that's the resolution our models work with
@@ -571,13 +694,46 @@ def process_ct_slice(slice_data, z_idx, pancreas_model, tumor_model, use_context
         accumulated_masks['pancreas'] = np.zeros((256, 256, depth), dtype=np.uint8)
         accumulated_masks['tumor'] = np.zeros((256, 256, depth), dtype=np.uint8)
         print(f"[INFO] Initialized 3D mask accumulation: shape={accumulated_masks['shape']}")
+        print(f"[INFO] Shape convention: (Height=256, Width=256, Depth={depth}) matching CT volume axis order")
+        
+        # Reset detected regions for new scan
+        detected_regions = []
     
     # Store masks at this slice index (masks are already 256x256 from model output)
     if accumulated_masks['pancreas'] is not None:
         if results['pancreas_mask'] is not None:
             accumulated_masks['pancreas'][:, :, z_idx] = results['pancreas_mask']
+            
+            # Track pancreas detection coordinates
+            pancreas_coords = extract_region_coordinates(
+                results['pancreas_mask'], 
+                z_idx, 
+                current_volume_affine,
+                current_volume_spacing
+            )
+            if pancreas_coords:
+                detected_regions.append({
+                    'type': 'pancreas',
+                    'slice_idx': z_idx,
+                    **pancreas_coords
+                })
+        
         if results['tumor_mask'] is not None:
             accumulated_masks['tumor'][:, :, z_idx] = results['tumor_mask']
+            
+            # Track tumor detection coordinates
+            tumor_coords = extract_region_coordinates(
+                results['tumor_mask'],
+                z_idx,
+                current_volume_affine,
+                current_volume_spacing
+            )
+            if tumor_coords:
+                detected_regions.append({
+                    'type': 'tumor',
+                    'slice_idx': z_idx,
+                    **tumor_coords
+                })
     
     return results
 
@@ -674,7 +830,8 @@ class RequestHandler(BaseHTTPRequestHandler):
     
     def _handle_load_nii(self):
         """Load .nii file and extract all slices"""
-        global current_volume, current_volume_shape, current_volume_spacing, tumor_context, accumulated_masks
+        global current_volume, current_volume_shape, current_volume_spacing, current_volume_affine, current_volume_origin
+        global tumor_context, accumulated_masks, detected_regions
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -683,13 +840,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             # Decode base64 file
             file_bytes = base64.b64decode(data['file'])
             
-            # Load NIfTI file with spacing
-            volume, spacing = load_nii_file(file_bytes)
+            # Load NIfTI file with spacing and spatial metadata
+            volume, spacing, affine, origin = load_nii_file(file_bytes)
             
-            # Store volume and spacing globally for scan_slice endpoint
+            # Store volume and spatial metadata globally
             current_volume = volume
             current_volume_shape = volume.shape
             current_volume_spacing = spacing
+            current_volume_affine = affine
+            current_volume_origin = origin
             
             # Reset tumor context for new volume
             tumor_context.reset()
@@ -702,6 +861,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 'shape': None,
             }
             print(f"[INFO] Accumulated masks reset for new volume")
+            
+            # Reset detected regions
+            detected_regions = []
+            print(f"[INFO] Detected regions tracking reset")
             
             # Extract all slices as base64-encoded PNGs
             slices = []
@@ -920,7 +1083,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(error_response).encode())
     
     def _handle_generate_3d_model(self):
-        """Generate 3D mesh from accumulated segmentation masks"""
+        """Generate 3D volume data from accumulated segmentation masks"""
         global accumulated_masks
         try:
             # Check if we have accumulated masks
@@ -936,67 +1099,101 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps(error_response).encode())
                 return
             
-            print("[INFO] Generating 3D model...")
+            print("[INFO] Generating 3D segmentation volumes...")
             
-            # Calculate effective spacing for 256x256 masks
-            # If original volume was different size, scale the spacing accordingly
-            global current_volume_spacing, current_volume_shape
-            if current_volume_shape is not None:
-                # Scale spacing based on how much we resized to 256x256
-                orig_x, orig_y = current_volume_shape[0], current_volume_shape[1]
-                scale_x = orig_x / 256.0
-                scale_y = orig_y / 256.0
-                effective_spacing = (
-                    current_volume_spacing[0] * scale_x,
-                    current_volume_spacing[1] * scale_y,
-                    current_volume_spacing[2]  # Z spacing unchanged
-                )
-            else:
-                effective_spacing = current_volume_spacing
+            # Get original mask dimensions
+            original_shape = accumulated_masks['pancreas'].shape
+            print(f"[INFO] Original mask shape: {original_shape}")
+            print(f"[INFO] Shape interpretation: (Height={original_shape[0]}, Width={original_shape[1]}, Depth={original_shape[2]})")
             
-            print(f"[INFO] Using effective spacing: {effective_spacing}")
+            # Use scipy.ndimage.zoom to resize to 256^3 (matching generate_volume_data endpoint)
+            from scipy.ndimage import zoom
+            target_dim = 256
             
-            # Generate meshes using marching cubes
-            gltf_bytes = generate_3d_mesh_from_masks({
-                'pancreas': accumulated_masks['pancreas'],
-                'tumor': accumulated_masks['tumor'],
-            }, spacing=effective_spacing)
+            # IMPORTANT: accumulated_masks is stored as (Height=256, Width=256, Depth=Z_slices)
+            # DO NOT transpose - use masks directly to maintain alignment with CT volume
+            pancreas_mask = accumulated_masks['pancreas']
+            tumor_mask = accumulated_masks['tumor']
             
-            if gltf_bytes is None:
-                self.send_response(400)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                error_response = {
-                    'success': False,
-                    'error': 'Failed to generate 3D model. No valid geometry found.'
-                }
-                self.wfile.write(json.dumps(error_response).encode())
-                return
+            # Calculate scale factors
+            scale_factors = [
+                target_dim / original_shape[0],  # Height (Y axis)
+                target_dim / original_shape[1],  # Width (X axis)
+                target_dim / original_shape[2]   # Depth (Z axis)
+            ]
             
-            # Save to temporary file for serving
-            import tempfile
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.glb', dir=os.path.dirname(__file__))
-            temp_file.write(gltf_bytes)
-            temp_file.close()
+            print(f"[INFO] Scale factors (H, W, D): {scale_factors}")
+            print(f"[INFO] Zooming masks from {original_shape} to ({target_dim}, {target_dim}, {target_dim})...")
             
-            # Store the temp file path globally
-            global _last_3d_model_path
-            _last_3d_model_path = temp_file.name
+            # Resize using nearest neighbor interpolation
+            pancreas_volume = zoom(pancreas_mask.astype(np.float32), scale_factors, order=0)
+            tumor_volume = zoom(tumor_mask.astype(np.float32), scale_factors, order=0)
             
-            response = {
+            # Convert to uint8 255
+            pancreas_volume = (pancreas_volume > 0.5).astype(np.uint8) * 255
+            tumor_volume = (tumor_volume > 0.5).astype(np.uint8) * 255
+            
+            print(f"[INFO] Final segmentation volumes: {target_dim}x{target_dim}x{target_dim}")
+            print(f"[INFO] Pancreas non-zero voxels: {np.sum(pancreas_volume > 0)}")
+            print(f"[INFO] Tumor non-zero voxels: {np.sum(tumor_volume > 0)}")
+            
+            # Encode volumes as base64 (C-order to match volume data)
+            pancreas_base64 = base64.b64encode(pancreas_volume.flatten(order='C')).decode('utf-8')
+            tumor_base64 = base64.b64encode(tumor_volume.flatten(order='C')).decode('utf-8')
+            
+            response_data = {
                 'success': True,
-                'model_url': f'http://localhost:8765/model.glb',
-                'size_bytes': len(gltf_bytes)
+                'format': 'volume',  # New format indicator
+                'dimensions': [target_dim, target_dim, target_dim],
+                'pancreas_volume': pancreas_base64,
+                'tumor_volume': tumor_base64,
+                'pancreas_voxel_count': int(np.sum(pancreas_volume > 0)),
+                'tumor_voxel_count': int(np.sum(tumor_volume > 0))
             }
+            
+            # Also try to generate meshes as fallback for compatibility
+            try:
+                print("[INFO] Also generating mesh fallback...")
+                
+                # Calculate effective spacing for 256x256 masks
+                global current_volume_spacing, current_volume_shape
+                if current_volume_shape is not None:
+                    orig_x, orig_y = current_volume_shape[0], current_volume_shape[1]
+                    scale_x = orig_x / 256.0
+                    scale_y = orig_y / 256.0
+                    effective_spacing = (
+                        current_volume_spacing[0] * scale_x,
+                        current_volume_spacing[1] * scale_y,
+                        current_volume_spacing[2]
+                    )
+                else:
+                    effective_spacing = (1.0, 1.0, 1.0)
+                
+                print(f"[INFO] Using effective spacing for mesh: {effective_spacing}")
+                
+                gltf_bytes = generate_3d_mesh_from_masks({
+                    'pancreas': accumulated_masks['pancreas'],
+                    'tumor': accumulated_masks['tumor'],
+                }, spacing=effective_spacing)
+                
+                if gltf_bytes is not None:
+                    glb_base64 = base64.b64encode(gltf_bytes).decode('utf-8')
+                    response_data['glb_fallback'] = glb_base64
+                    print(f"[OK] Generated both volume and mesh formats")
+                else:
+                    print(f"[WARNING] Mesh generation returned None")
+                    
+            except Exception as e:
+                print(f"[WARNING] Mesh generation failed: {e}")
+                print(f"[INFO] Using volume-only format")
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
-            self.wfile.write(json.dumps(response).encode())
+            self.wfile.write(json.dumps(response_data).encode())
             
-            print(f"[OK] 3D model generated and ready: {len(gltf_bytes)} bytes at {temp_file.name}")
+            print(f"[OK] 3D segmentation volumes generated")
             
         except Exception as e:
             print(f"[ERROR] Failed to generate 3D model: {e}")
@@ -1035,13 +1232,123 @@ class RequestHandler(BaseHTTPRequestHandler):
             # Export volume data
             volume_info = export_volume_data(current_volume, target_size=256)
             
-            # Also generate meshes if available
+            # Calculate resampling transform for coordinate mapping
+            global current_volume_shape, current_volume_spacing, current_volume_affine, current_volume_origin, detected_regions
+            resampling_transform = calculate_resampling_transform(
+                current_volume_shape,
+                [256, 256, 256],
+                current_volume_spacing
+            )
+            
+            # Prepare spatial metadata - convert all numpy types to native Python types
+            spatial_metadata = {
+                'original_affine': current_volume_affine.tolist() if current_volume_affine is not None else None,
+                'original_spacing': [float(x) for x in current_volume_spacing],  # Convert numpy.float32 to Python float
+                'original_shape': [int(x) for x in current_volume_shape],        # Convert to Python int
+                'original_origin': current_volume_origin.tolist() if current_volume_origin is not None else None,
+                'resampling_transform': {
+                    'scale_factors': [float(x) for x in resampling_transform['scale_factors']],
+                    'new_spacing': [float(x) for x in resampling_transform['new_spacing']]
+                },
+                'detected_regions': detected_regions  # Include tracked detections
+            }
+            
+            print(f"[INFO] Spatial metadata prepared:")
+            print(f"  - Original shape: {current_volume_shape}")
+            print(f"  - Original spacing: {current_volume_spacing}")
+            print(f"  - Resampling scale factors: {resampling_transform['scale_factors']}")
+            print(f"  - Detected regions: {len(detected_regions)}")
+            
+            # Prepare response with volume data
+            response = {
+                'success': True,
+                'volume_data': volume_info['data'],
+                'dimensions': volume_info['dimensions'],
+                'spacing': volume_info['spacing'],
+                'window_min': volume_info['window_min'],
+                'window_max': volume_info['window_max'],
+                'data_size_bytes': len(volume_info['data']),
+                'spatial_metadata': spatial_metadata  # Add spatial metadata
+            }
+            
+            # Also generate segmentation volumes if available
+            if accumulated_masks['pancreas'] is not None:
+                print("[INFO] Also generating segmentation volumes...")
+                try:
+                    # Get original mask dimensions
+                    original_shape = accumulated_masks['pancreas'].shape
+                    print(f"[INFO] Original mask shape: {original_shape}")
+                    print(f"[INFO] Shape interpretation: (Height={original_shape[0]}, Width={original_shape[1]}, Depth={original_shape[2]})")
+                    
+                    # IMPORTANT: accumulated_masks is stored as (Height=256, Width=256, Depth=Z_slices)
+                    # This matches the CT volume axis convention: (X, Y, Z)
+                    # DO NOT transpose - use masks directly to maintain alignment
+                    
+                    from scipy.ndimage import zoom
+                    target_dim = 256
+                    
+                    # Use masks directly without transpose
+                    pancreas_mask = accumulated_masks['pancreas']
+                    tumor_mask = accumulated_masks['tumor']
+                    
+                    # Calculate scale factors to reach target_dim x target_dim x target_dim
+                    scale_factors = [
+                        target_dim / original_shape[0],  # Height (Y axis)
+                        target_dim / original_shape[1],  # Width (X axis)
+                        target_dim / original_shape[2]   # Depth (Z axis)
+                    ]
+                    
+                    print(f"[INFO] Scale factors (H, W, D): {scale_factors}")
+                    print(f"[INFO] Zooming masks from {original_shape} to ({target_dim}, {target_dim}, {target_dim})...")
+                    
+                    # Resize using nearest neighbor interpolation (order=0) for binary masks
+                    pancreas_volume = zoom(pancreas_mask.astype(np.float32), scale_factors, order=0)
+                    tumor_volume = zoom(tumor_mask.astype(np.float32), scale_factors, order=0)
+                    
+                    print(f"[INFO] After zoom - Pancreas shape: {pancreas_volume.shape}, Tumor shape: {tumor_volume.shape}")
+                    
+                    # Convert to uint8 255
+                    pancreas_volume = (pancreas_volume > 0.5).astype(np.uint8) * 255
+                    tumor_volume = (tumor_volume > 0.5).astype(np.uint8) * 255
+                    
+                    print(f"[INFO] Final segmentation volumes: {target_dim}x{target_dim}x{target_dim}")
+                    print(f"[INFO] Pancreas non-zero voxels: {np.sum(pancreas_volume > 0)}")
+                    print(f"[INFO] Tumor non-zero voxels: {np.sum(tumor_volume > 0)}")
+                    
+                    # Add sample coordinate check
+                    if np.sum(pancreas_volume > 0) > 0:
+                        # Find first non-zero voxel for debugging
+                        coords = np.argwhere(pancreas_volume > 0)
+                        first_coord = coords[0]
+                        center_coord = coords[len(coords)//2]
+                        print(f"[DEBUG] Pancreas first voxel at: {first_coord}")
+                        print(f"[DEBUG] Pancreas center voxel at: {center_coord}")
+                    
+                    # Encode volumes as base64
+                    pancreas_base64 = base64.b64encode(pancreas_volume.flatten(order='C')).decode('utf-8')
+                    tumor_base64 = base64.b64encode(tumor_volume.flatten(order='C')).decode('utf-8')
+                    
+                    # Add segmentation volumes to response
+                    response['segmentation_format'] = 'volume'
+                    response['segmentation_dimensions'] = [target_dim, target_dim, target_dim]
+                    response['pancreas_volume'] = pancreas_base64
+                    response['tumor_volume'] = tumor_base64
+                    response['pancreas_voxel_count'] = int(np.sum(pancreas_volume > 0))
+                    response['tumor_voxel_count'] = int(np.sum(tumor_volume > 0))
+                    
+                    print(f"[OK] Segmentation volumes generated with correct axis alignment")
+                    
+                except Exception as seg_error:
+                    print(f"[WARNING] Failed to generate segmentation volumes: {seg_error}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Also generate mesh fallback if available
             model_url = None
             if accumulated_masks['pancreas'] is not None:
-                print("[INFO] Also generating 3D meshes...")
+                print("[INFO] Also generating mesh fallback...")
                 try:
                     # Calculate effective spacing
-                    global current_volume_spacing, current_volume_shape
                     if current_volume_shape is not None:
                         orig_x, orig_y = current_volume_shape[0], current_volume_shape[1]
                         scale_x = orig_x / 256.0
@@ -1060,30 +1367,24 @@ class RequestHandler(BaseHTTPRequestHandler):
                     }, spacing=effective_spacing)
                     
                     if gltf_bytes is not None:
+                        # Cleanup old GLB files before creating new one
+                        cleanup_temp_glb_files()
+                        
                         # Save to temporary file
                         import tempfile
                         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.glb', dir=os.path.dirname(__file__))
                         temp_file.write(gltf_bytes)
                         temp_file.close()
                         
-                        # Store the temp file path globally
-                        global _last_3d_model_path
+                        # Store the temp file path globally and track it
+                        global _last_3d_model_path, _temp_glb_files
                         _last_3d_model_path = temp_file.name
+                        _temp_glb_files.append(temp_file.name)
                         model_url = 'http://localhost:8765/model.glb'
-                        print(f"[OK] Meshes also generated: {len(gltf_bytes)} bytes")
+                        response['model_url'] = model_url
+                        print(f"[OK] Mesh fallback also generated: {len(gltf_bytes)} bytes")
                 except Exception as mesh_error:
-                    print(f"[WARNING] Failed to generate meshes: {mesh_error}")
-            
-            response = {
-                'success': True,
-                'volume_data': volume_info['data'],
-                'dimensions': volume_info['dimensions'],
-                'spacing': volume_info['spacing'],
-                'window_min': volume_info['window_min'],
-                'window_max': volume_info['window_max'],
-                'model_url': model_url,
-                'data_size_bytes': len(volume_info['data'])
-            }
+                    print(f"[WARNING] Failed to generate mesh fallback: {mesh_error}")
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -1179,6 +1480,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             with open(output_path, 'wb') as f:
                 f.write(gltf_bytes)
             
+            # Track this file for cleanup
+            global _temp_glb_files
+            if output_path not in _temp_glb_files:
+                _temp_glb_files.append(output_path)
+            
             print(f"[OK] Volume mesh saved to: {output_path}")
             print(f"[OK] File size: {len(gltf_bytes)} bytes")
             print(f"[INFO] You can open this file in Windows 3D Viewer!")
@@ -1263,7 +1569,10 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down...")
+        print("[INFO] Cleaning up temporary files...")
+        cleanup_temp_glb_files()
         server.shutdown()
+        print("[OK] Server stopped")
 
 if __name__ == '__main__':
     main()
