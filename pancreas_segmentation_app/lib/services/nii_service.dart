@@ -14,6 +14,13 @@ class NiiService extends ChangeNotifier {
   
   NiiScan? _currentScan;
   
+  // Predefined server options
+  static const List<Map<String, String>> serverOptions = [
+    {'name': 'Local Server', 'url': 'http://localhost:8765'},
+    {'name': 'Local (Alt Port)', 'url': 'http://localhost:8080'},
+    {'name': 'Network Server', 'url': 'http://192.168.1.100:8765'},
+  ];
+  
   bool get isServerReady => _isServerReady;
   bool get isLoading => _isLoading;
   bool get isScanning => _isScanning;
@@ -161,52 +168,75 @@ class NiiService extends ChangeNotifier {
       _statusMessage = 'Processing all slices (context-aware)...';
       notifyListeners();
       
-      final response = await http.post(
-        Uri.parse('$_serverUrl/scan_all'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(minutes: 10));  // Longer timeout for batch processing
-      
-      if (response.statusCode != 200) {
-        throw Exception('Server error: ${response.statusCode}');
-      }
-      
-      final result = jsonDecode(response.body);
-      if (result['success'] != true) {
-        throw Exception(result['error'] ?? 'Unknown error');
-      }
-      
-      // Parse batch results
-      final results = result['results'] as List;
-      final totalSlices = results.length;
-      
-      for (var i = 0; i < results.length; i++) {
-        final sliceResult = results[i];
-        final sliceIndex = sliceResult['slice_index'] as int;
-        
-        // Find corresponding slice
-        final slice = _currentScan!.slices.firstWhere((s) => s.index == sliceIndex);
-        
-        // Decode overlay
-        final overlayBytes = base64Decode(sliceResult['overlay'] as String);
-        
-        // Update slice with results
-        slice.updateResults(
-          hasPancreas: sliceResult['has_pancreas'] as bool,
-          hasTumor: sliceResult['has_tumor'] as bool,
-          pancreasPixels: sliceResult['pancreas_pixels'] as int,
-          tumorPixels: sliceResult['tumor_pixels'] as int,
-          overlayBytes: overlayBytes,
-        );
-        
-        // Update progress
-        _scanProgress = (i + 1) / totalSlices;
-        if ((i + 1) % 10 == 0 || i == totalSlices - 1) {
-          _statusMessage = 'Processed ${i + 1}/$totalSlices slices (context-aware)';
+      // Start a timer to simulate progress while waiting for server response
+      final totalSlices = _currentScan!.numSlices;
+      final progressTimer = Stream.periodic(
+        const Duration(milliseconds: 100),
+        (tick) => tick,
+      ).listen((tick) {
+        // Simulate progress up to 90%, will jump to 100% when response arrives
+        final estimatedProgress = (tick * 0.5) / totalSlices;
+        if (estimatedProgress < 0.9) {
+          _scanProgress = estimatedProgress;
+          final estimatedSlice = (estimatedProgress * totalSlices).toInt();
+          _statusMessage = 'Processing $estimatedSlice/$totalSlices slices...';
           notifyListeners();
         }
-      }
+      });
       
-      debugPrint('Batch scan complete: ${result['summary']}');
+      try {
+        final response = await http.post(
+          Uri.parse('$_serverUrl/scan_all'),
+          headers: {'Content-Type': 'application/json'},
+        ).timeout(const Duration(minutes: 10));  // Longer timeout for batch processing
+        
+        // Cancel progress timer
+        progressTimer.cancel();
+        
+        if (response.statusCode != 200) {
+          throw Exception('Server error: ${response.statusCode}');
+        }
+        
+        final result = jsonDecode(response.body);
+        if (result['success'] != true) {
+          throw Exception(result['error'] ?? 'Unknown error');
+        }
+        
+        // Parse batch results
+        final results = result['results'] as List;
+        
+        for (var i = 0; i < results.length; i++) {
+          final sliceResult = results[i];
+          final sliceIndex = sliceResult['slice_index'] as int;
+          
+          // Find corresponding slice
+          final slice = _currentScan!.slices.firstWhere((s) => s.index == sliceIndex);
+          
+          // Decode overlay
+          final overlayBytes = base64Decode(sliceResult['overlay'] as String);
+          
+          // Update slice with results
+          slice.updateResults(
+            hasPancreas: sliceResult['has_pancreas'] as bool,
+            hasTumor: sliceResult['has_tumor'] as bool,
+            pancreasPixels: sliceResult['pancreas_pixels'] as int,
+            tumorPixels: sliceResult['tumor_pixels'] as int,
+            overlayBytes: overlayBytes,
+          );
+          
+          // Update progress
+          _scanProgress = (i + 1) / totalSlices;
+          if ((i + 1) % 10 == 0 || i == totalSlices - 1) {
+            _statusMessage = 'Processed ${i + 1}/$totalSlices slices';
+            notifyListeners();
+          }
+        }
+        
+        debugPrint('Batch scan complete: ${result['summary']}');
+        
+      } finally {
+        progressTimer.cancel();
+      }
       
     } catch (e) {
       debugPrint('Batch scan error: $e');

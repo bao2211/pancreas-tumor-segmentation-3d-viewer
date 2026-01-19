@@ -46,114 +46,251 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <style>
+    * {
+      box-sizing: border-box;
+    }
     body {
       margin: 0;
       padding: 0;
-      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #0F172A;
       color: #E2E8F0;
       overflow: hidden;
     }
     .container {
       display: flex;
-      flex-direction: column;
       height: 100vh;
-    }
-    .header {
-      background: rgba(30, 41, 59, 0.95);
-      padding: 20px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-      z-index: 10;
-    }
-    .title {
-      font-size: 24px;
-      font-weight: bold;
-      margin: 0 0 10px 0;
-      color: #06B6D4;
-    }
-    .legend {
-      display: flex;
-      gap: 20px;
-      margin-top: 10px;
-    }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .legend-box {
-      width: 16px;
-      height: 16px;
-      border: 2px solid;
-      border-radius: 3px;
-    }
-    .pancreas-color {
-      border-color: #06B6D4;
-      background: rgba(6, 182, 212, 0.3);
-    }
-    .tumor-color {
-      border-color: #EF4444;
-      background: rgba(239, 68, 68, 0.5);
     }
     .viewer-container {
       flex: 1;
       position: relative;
-      min-height: 0;
     }
     #canvas3d {
       width: 100%;
       height: 100%;
       display: block;
     }
-    .controls {
+    .sidebar {
+      width: 320px;
       background: rgba(30, 41, 59, 0.95);
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+      z-index: 10;
+    }
+    .sidebar-header {
       padding: 20px;
-      box-shadow: 0 -4px 6px rgba(0, 0, 0, 0.3);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 20px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
     }
-    .control-group {
+    .title {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0 0 8px 0;
+      color: #06B6D4;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
-    button {
-      background: #3B82F6;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
+    .subtitle {
+      font-size: 13px;
+      color: #94A3B8;
+      margin: 0;
+    }
+    .sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    .section {
+      margin-bottom: 24px;
+    }
+    .section-title {
+      font-size: 12px;
       font-weight: 600;
-      transition: background 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #64748B;
+      margin: 0 0 12px 0;
     }
-    button:hover {
-      background: #2563EB;
-    }
-    .toggle {
+    .control-row {
       display: flex;
       align-items: center;
-      gap: 10px;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 6px;
     }
-    input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
+    .control-label {
+      font-size: 13px;
+      color: #CBD5E1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 42px;
+      height: 24px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
       cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #475569;
+      transition: .3s;
+      border-radius: 24px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #06B6D4;
+    }
+    input:checked + .slider:before {
+      transform: translateX(18px);
+    }
+    .range-control {
+      width: 100%;
+      margin-bottom: 16px;
+    }
+    .range-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .range-label {
+      font-size: 13px;
+      color: #CBD5E1;
+    }
+    .range-value {
+      font-size: 13px;
+      color: #06B6D4;
+      font-weight: 600;
+      font-family: 'Courier New', monospace;
     }
     input[type="range"] {
+      width: 100%;
+      height: 4px;
+      border-radius: 2px;
+      background: #334155;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #06B6D4;
       cursor: pointer;
+      border: 2px solid #0F172A;
     }
-    .control-group label {
-      white-space: nowrap;
-      font-size: 14px;
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #06B6D4;
+      cursor: pointer;
+      border: 2px solid #0F172A;
     }
-    .control-group span {
-      min-width: 30px;
-      text-align: right;
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 6px;
       font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .btn-primary {
+      background: #3B82F6;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #2563EB;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+    }
+    .btn-secondary {
+      background: rgba(100, 116, 139, 0.3);
+      color: #CBD5E1;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    .btn-secondary:hover {
+      background: rgba(100, 116, 139, 0.5);
+      border-color: rgba(148, 163, 184, 0.4);
+    }
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.2);
+      color: #FCA5A5;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.3);
+      border-color: rgba(239, 68, 68, 0.5);
+    }
+    .legend {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 6px;
+    }
+    .legend-color {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .legend-label {
+      font-size: 13px;
+      color: #CBD5E1;
+      flex: 1;
+    }
+    .legend-cyan {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.4), rgba(6, 182, 212, 0.8));
+      border: 2px solid #06B6D4;
+    }
+    .legend-red {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.4), rgba(239, 68, 68, 0.8));
+      border: 2px solid #EF4444;
+    }
+    .legend-gray {
+      background: linear-gradient(135deg, rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0.4));
+      border: 2px solid #64748B;
     }
     .loading {
       position: absolute;
@@ -162,93 +299,240 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
       transform: translate(-50%, -50%);
       text-align: center;
       z-index: 100;
-      background: rgba(30, 41, 59, 0.9);
-      padding: 30px;
-      border-radius: 10px;
+      background: rgba(30, 41, 59, 0.95);
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
     }
     .spinner {
-      border: 3px solid rgba(6, 182, 212, 0.3);
+      border: 3px solid rgba(6, 182, 212, 0.2);
       border-top: 3px solid #06B6D4;
       border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 15px;
+      width: 48px;
+      height: 48px;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 20px;
     }
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
-    .instructions {
-      background: rgba(59, 130, 246, 0.1);
-      border: 1px solid rgba(59, 130, 246, 0.3);
+    .loading-text {
+      font-size: 14px;
+      color: #94A3B8;
+    }
+    .info-panel {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(30, 41, 59, 0.95);
+      backdrop-filter: blur(10px);
+      padding: 16px;
+      border-radius: 8px;
+      max-width: 300px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+    .info-item {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .info-label {
+      color: #94A3B8;
+    }
+    .info-value {
+      color: #06B6D4;
+      font-weight: 600;
+      font-family: 'Courier New', monospace;
+    }
+    .shortcuts {
+      background: rgba(15, 23, 42, 0.5);
       padding: 12px;
       border-radius: 6px;
-      font-size: 13px;
+      font-size: 12px;
+      line-height: 1.6;
       color: #94A3B8;
+    }
+    .shortcuts strong {
+      color: #CBD5E1;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.5);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #64748B;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="header">
-      <h1 class="title">🔬 3D Pancreas & Tumor Visualization</h1>
-      <div class="instructions">
-        💡 <strong>Controls:</strong> Left-click + drag to rotate • Scroll to zoom • Right-click + drag to pan
-      </div>
-      <div class="legend">
-        <div class="legend-item">
-          <div class="legend-box pancreas-color"></div>
-          <span>Pancreas Tissue</span>
-        </div>
-        <div class="legend-item">
-          <div class="legend-box tumor-color"></div>
-          <span>Tumor Regions</span>
-        </div>
-      </div>
-    </div>
-    
     <div class="viewer-container">
       <div class="loading" id="loading">
         <div class="spinner"></div>
-        <div>Loading 3D model...</div>
+        <div class="loading-text">Loading 3D visualization...</div>
+      </div>
+      
+      <div class="info-panel" id="infoPanel" style="display: none;">
+        <div class="info-item">
+          <span class="info-label">Vertices:</span>
+          <span class="info-value" id="vertexCount">-</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Faces:</span>
+          <span class="info-value" id="faceCount">-</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">FPS:</span>
+          <span class="info-value" id="fpsCount">60</span>
+        </div>
       </div>
       
       <canvas id="canvas3d"></canvas>
     </div>
     
-    <div class="controls">
-      <div class="toggle">
-        <input type="checkbox" id="autoRotate">
-        <label for="autoRotate">Auto Rotate</label>
-      </div>      <button onclick="focusOnSegmentation()">🔍 Focus on Pancreas/Tumor</button>      <div class="control-group" style="min-width: 200px;">
-        <label for="lightIntensity">💡 Light:</label>
-        <input type="range" id="lightIntensity" min="0" max="2" step="0.1" value="0.8" style="flex: 1;">
-        <span id="lightValue">0.8</span>
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <h1 class="title">
+          <span>🔬</span>
+          <span>3D Viewer</span>
+        </h1>
+        <p class="subtitle">Pancreas & Tumor Visualization</p>
       </div>
-      <div id="volumeControls" style="display: flex; gap: 15px;">
-        <div class="control-group" style="min-width: 200px;">
-          <label for="volumeOpacity">🔲 Volume:</label>
-          <input type="range" id="volumeOpacity" min="0" max="1" step="0.05" value="0.15" style="flex: 1;">
-          <span id="volumeOpacityValue">0.15</span>
+      
+      <div class="sidebar-content">
+        <!-- Legend Section -->
+        <div class="section">
+          <div class="section-title">🎨 ANATOMY LEGEND</div>
+          <div class="legend">
+            <div class="legend-item">
+              <div class="legend-color legend-cyan"></div>
+              <span class="legend-label">Pancreas Tissue</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color legend-red"></div>
+              <span class="legend-label">Tumor Region</span>
+            </div>
+            <div class="legend-item" id="volumeLegend" style="display: none;">
+              <div class="legend-color legend-gray"></div>
+              <span class="legend-label">CT Volume</span>
+            </div>
+          </div>
         </div>
-        <div class="toggle">
-          <input type="checkbox" id="showVolume" checked>
-          <label for="showVolume">Show Volume</label>
+        
+        <!-- Visibility Section -->
+        <div class="section">
+          <div class="section-title">👁️ VISIBILITY</div>
+          <div class="control-row">
+            <span class="control-label">
+              <span>🫁</span>
+              <span>Pancreas</span>
+            </span>
+            <label class="switch">
+              <input type="checkbox" id="showPancreas" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="control-row">
+            <span class="control-label">
+              <span>🔴</span>
+              <span>Tumor</span>
+            </span>
+            <label class="switch">
+              <input type="checkbox" id="showTumor" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="control-row" id="volumeToggle" style="display: none;">
+            <span class="control-label">
+              <span>🔲</span>
+              <span>CT Volume</span>
+            </span>
+            <label class="switch">
+              <input type="checkbox" id="showVolume" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="control-row" id="markersToggle" style="display: none;">
+            <span class="control-label">
+              <span>📍</span>
+              <span>Debug Markers</span>
+            </span>
+            <label class="switch">
+              <input type="checkbox" id="showMarkers" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        
+        <!-- Opacity Section -->
+        <div class="section" id="opacitySection" style="display: none;">
+          <div class="section-title">🌫️ OPACITY</div>
+          <div class="range-control">
+            <div class="range-header">
+              <span class="range-label">CT Volume</span>
+              <span class="range-value" id="volumeOpacityValue">0.15</span>
+            </div>
+            <input type="range" id="volumeOpacity" min="0" max="1" step="0.01" value="0.15">
+          </div>
+        </div>
+        
+        <!-- Camera Section -->
+        <div class="section">
+          <div class="section-title">📷 CAMERA</div>
+          <button class="btn btn-primary" onclick="focusOnSegmentation()">
+            <span>🔍</span>
+            <span>Focus on Detection</span>
+          </button>
+          <button class="btn btn-secondary" onclick="resetCamera()">
+            <span>🔄</span>
+            <span>Reset View</span>
+          </button>
+          <button class="btn btn-secondary" onclick="toggleStats()">
+            <span>📊</span>
+            <span id="statsButtonText">Show Stats</span>
+          </button>
+        </div>
+        
+        <!-- Controls Guide -->
+        <div class="section">
+          <div class="section-title">⌨️ CONTROLS</div>
+          <div class="shortcuts">
+            <strong>🖱️ Mouse:</strong><br>
+            • Left-click + drag → Rotate<br>
+            • Scroll wheel → Zoom<br>
+            • Right-click + drag → Pan<br>
+            <br>
+            <strong>⌨️ Keyboard:</strong><br>
+            • R → Reset camera<br>
+            • F → Focus on detection<br>
+            • S → Toggle stats<br>
+          </div>
+        </div>
+        
+        <!-- Exit Button -->
+        <div class="section">
+          <button class="btn btn-danger" onclick="window.close()">
+            <span>✖️</span>
+            <span>Close Viewer</span>
+          </button>
         </div>
       </div>
-      <button onclick="resetCamera()">🔄 Reset Camera</button>
-      <button onclick="window.close()">✅ Done</button>
     </div>
   </div>
   
   <script>
     const canvas = document.getElementById('canvas3d');
     const loading = document.querySelector('#loading');
-    const autoRotateCheckbox = document.querySelector('#autoRotate');
     
     let scene, camera, renderer, controls, model, modelGroup;
-    let autoRotateEnabled = false;
     let directionalLight, ambientLight;
     let volumeMesh = null;
     let volumeData = null;
@@ -531,6 +815,9 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
       
       console.log('✅ Three.js initialized');
       
+      // Setup UI controls
+      setupControls();
+      
       // Start animation loop
       animate();
     }
@@ -543,10 +830,6 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
     
     function animate() {
       requestAnimationFrame(animate);
-      
-      if (autoRotateEnabled && modelGroup) {
-        modelGroup.rotation.y += 0.005;
-      }
       
       // Update camera position in volume shaders
       if (volumeMesh && volumeMesh.material.uniforms) {
@@ -562,6 +845,10 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
       }
       
       controls.update();
+      
+      // Update stats
+      updateStats();
+      
       renderer.render(scene, camera);
     }
     
@@ -1075,10 +1362,14 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
             { x: scaleX, y: scaleY, z: scaleZ },
             dimensions
           );
+          // Show markers toggle
+          document.getElementById('markersToggle').style.display = 'flex';
         }
         
-        // Show volume controls
-        document.getElementById('volumeControls').style.display = 'flex';
+        // Show volume controls in sidebar
+        document.getElementById('volumeToggle').style.display = 'flex';
+        document.getElementById('volumeLegend').style.display = 'flex';
+        document.getElementById('opacitySection').style.display = 'block';
         
       } catch (error) {
         console.error('Failed to load volume data:', error);
@@ -1289,47 +1580,6 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
       }
     });
     
-    autoRotateCheckbox.addEventListener('change', (e) => {
-      autoRotateEnabled = e.target.checked;
-      console.log('Auto-rotate:', autoRotateEnabled);
-    });
-    
-    // Light intensity slider
-    const lightSlider = document.getElementById('lightIntensity');
-    const lightValue = document.getElementById('lightValue');
-    
-    lightSlider.addEventListener('input', (e) => {
-      const intensity = parseFloat(e.target.value);
-      if (directionalLight) {
-        directionalLight.intensity = intensity;
-        lightValue.textContent = intensity.toFixed(1);
-        console.log('Light intensity:', intensity);
-      }
-    });
-    
-    // Volume opacity slider
-    const volumeOpacitySlider = document.getElementById('volumeOpacity');
-    const volumeOpacityValue = document.getElementById('volumeOpacityValue');
-    
-    volumeOpacitySlider.addEventListener('input', (e) => {
-      const opacity = parseFloat(e.target.value);
-      if (volumeMesh && volumeMesh.material && volumeMesh.material.uniforms) {
-        volumeMesh.material.uniforms.opacity.value = opacity;
-        volumeOpacityValue.textContent = opacity.toFixed(2);
-        console.log('Volume opacity:', opacity);
-      }
-    });
-    
-    // Volume visibility toggle
-    const showVolumeCheckbox = document.getElementById('showVolume');
-    
-    showVolumeCheckbox.addEventListener('change', (e) => {
-      if (volumeMesh) {
-        volumeMesh.visible = e.target.checked;
-        console.log('Volume visible:', e.target.checked);
-      }
-    });
-    
     function focusOnSegmentation() {
       // Check if volume-based segmentations exist
       if (pancreasVolumeMesh || tumorVolumeMesh) {
@@ -1411,7 +1661,7 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
     }
     
     function resetCamera() {
-      camera.position.set(0, 1, 3);
+      camera.position.set(0, 1, 8);
       controls.target.set(0, 0, 0);
       
       // Reset volume opacity
@@ -1427,6 +1677,138 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
       
       controls.update();
       console.log('Camera reset');
+    }
+    
+    // Stats panel toggle
+    function toggleStats() {
+      const infoPanel = document.getElementById('infoPanel');
+      const statsButton = document.getElementById('statsButtonText');
+      if (infoPanel.style.display === 'none') {
+        infoPanel.style.display = 'block';
+        statsButton.textContent = 'Hide Stats';
+      } else {
+        infoPanel.style.display = 'none';
+        statsButton.textContent = 'Show Stats';
+      }
+    }
+    
+    // Update stats
+    let lastTime = performance.now();
+    let frames = 0;
+    function updateStats() {
+      frames++;
+      const currentTime = performance.now();
+      if (currentTime >= lastTime + 1000) {
+        const fps = Math.round((frames * 1000) / (currentTime - lastTime));
+        document.getElementById('fpsCount').textContent = fps;
+        frames = 0;
+        lastTime = currentTime;
+      }
+      
+      // Update vertex/face count if model loaded
+      if (modelGroup) {
+        let totalVertices = 0;
+        let totalFaces = 0;
+        modelGroup.traverse((child) => {
+          if (child.isMesh && child.geometry) {
+            if (child.geometry.attributes.position) {
+              totalVertices += child.geometry.attributes.position.count;
+            }
+            if (child.geometry.index) {
+              totalFaces += child.geometry.index.count / 3;
+            }
+          }
+        });
+        document.getElementById('vertexCount').textContent = totalVertices.toLocaleString();
+        document.getElementById('faceCount').textContent = Math.round(totalFaces).toLocaleString();
+      }
+    }
+    
+    // Setup UI controls
+    function setupControls() {
+      // Volume opacity
+      const volumeOpacitySlider = document.getElementById('volumeOpacity');
+      const volumeOpacityValue = document.getElementById('volumeOpacityValue');
+      volumeOpacitySlider.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        volumeOpacityValue.textContent = value.toFixed(2);
+        if (volumeMesh && volumeMesh.material.uniforms) {
+          volumeMesh.material.uniforms.opacity.value = value;
+        }
+      });
+      
+      // Volume visibility toggle
+      const showVolumeToggle = document.getElementById('showVolume');
+      showVolumeToggle.addEventListener('change', (e) => {
+        if (volumeMesh) {
+          volumeMesh.visible = e.target.checked;
+        }
+        console.log('Volume visibility:', e.target.checked);
+      });
+      
+      // Pancreas visibility toggle
+      const showPancreasToggle = document.getElementById('showPancreas');
+      showPancreasToggle.addEventListener('change', (e) => {
+        if (pancreasVolumeMesh) {
+          pancreasVolumeMesh.visible = e.target.checked;
+        }
+        // Also toggle mesh-based pancreas
+        if (modelGroup) {
+          modelGroup.traverse((child) => {
+            if (child.name === 'pancreas') {
+              child.visible = e.target.checked;
+            }
+          });
+        }
+        console.log('Pancreas visibility:', e.target.checked);
+      });
+      
+      // Tumor visibility toggle
+      const showTumorToggle = document.getElementById('showTumor');
+      showTumorToggle.addEventListener('change', (e) => {
+        if (tumorVolumeMesh) {
+          tumorVolumeMesh.visible = e.target.checked;
+        }
+        // Also toggle mesh-based tumor
+        if (modelGroup) {
+          modelGroup.traverse((child) => {
+            if (child.name === 'tumor') {
+              child.visible = e.target.checked;
+            }
+          });
+        }
+        console.log('Tumor visibility:', e.target.checked);
+      });
+      
+      // Markers visibility toggle
+      const showMarkersToggle = document.getElementById('showMarkers');
+      if (showMarkersToggle) {
+        showMarkersToggle.addEventListener('change', (e) => {
+          scene.children.forEach((child) => {
+            if (child.name && (child.name.startsWith('region_marker_') || child.name.startsWith('region_bbox_'))) {
+              child.visible = e.target.checked;
+            }
+          });
+          console.log('Markers visibility:', e.target.checked);
+        });
+      }
+      
+      // Keyboard shortcuts
+      document.addEventListener('keydown', (e) => {
+        switch(e.key.toLowerCase()) {
+          case 'r':
+            resetCamera();
+            break;
+          case 'f':
+            focusOnSegmentation();
+            break;
+          case 's':
+            toggleStats();
+            break;
+        }
+      });
+      
+      console.log('✅ UI controls setup complete');
     }
     
     // Initialize
