@@ -2,3 +2,26 @@
 /DATA_Pancreas_Segmentation_Bao
 /DATA_Pancreas_Segmentation_Bao_fix
 *.glb
+
+# Large model files (use Git LFS or cloud storage)
+*.keras
+*.h5
+*.pth
+*.ckpt
+
+# Large archives
+*.rar
+*.zip
+*.tar.gz
+
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Build artifacts
+build/
+*.dll
+*.pyd
+*.so
