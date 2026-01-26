@@ -323,7 +323,7 @@ class _NiiScanScreenState extends State<NiiScanScreen> {
     return Container(
       decoration: BoxDecoration(
         image: DecorationImage(
-          image: AssetImage('assets/images/hexagonal_background.jpeg'),
+          image: const AssetImage('assets/images/hexagonal_background.jpeg'),
           fit: BoxFit.cover,
           colorFilter: ColorFilter.mode(
             const Color(0xFF0F172A).withValues(alpha: 0.85),
@@ -600,10 +600,10 @@ class _NiiScanScreenState extends State<NiiScanScreen> {
                 const SizedBox(height: 16),
                 
                 // Supported formats
-                Text(
+                const Text(
                   'Supported formats: .nii, .nii.gz',
                   style: TextStyle(
-                    color: const Color(0xFF64748B),
+                    color: Color(0xFF64748B),
                     fontSize: 12,
                   ),
                 ),

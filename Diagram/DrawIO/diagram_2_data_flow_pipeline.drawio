@@ -1,0 +1,98 @@
+<?xml version="1.0" ?>
+<mxfile host="app.diagrams.net" modified="2026-01-20T00:00:00.000Z" agent="Python Generator" version="24.0.0">
+  <diagram name="Page-1" id="data-flow">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="Pipeline Xử Lý CT Volume → 3D Rendering" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="20" width="600" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="step1" value="NIfTI File&#10;.nii/.nii.gz" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FF6B6B;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="100" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step2" value="Load Volume&#10;512×512×200" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4ECDC4;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="200" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step3" value="HU Windowing&#10;-150 to 250 HU" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#45B7D1;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="300" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step4" value="Slice Extraction&#10;2D Images" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#96CEB4;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="400" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step5" value="U-Net Pancreas&#10;256×256 Mask" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEAA7;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="500" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step6" value="Loop Processing&#10;Z=0 to N" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DFE6E9;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="720" y="400" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step7" value="U-Net Tumor&#10;128×128 Mask" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEAA7;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="720" y="500" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step8" value="3D Mask Volume&#10;256×256×N" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#74B9FF;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="600" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step9" value="Marching Cubes&#10;Mesh Generation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A29BFE;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="500" y="700" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step10" value="Mesh Processing&#10;Simplification" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FD79A8;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="800" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step11" value="glTF Export&#10;Base64 Encode" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FDCB6E;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="720" y="800" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="step12" value="3D Viewer (WebGL)&#10;Interactive Render" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#00B894;strokeColor=#000000;strokeWidth=2;fontSize=11;fontStyle=1;fontColor=#FFFFFF;" vertex="1" parent="1">
+          <mxGeometry x="500" y="900" width="160" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step1" target="step2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step2" target="step3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step3" target="step4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step3" target="step6">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step4" target="step5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow6" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step6" target="step7">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step5" target="step8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step7" target="step8">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step8" target="step9">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow10" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step9" target="step10">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow11" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step9" target="step11">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step10" target="step12">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="arrow13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#2C3E50;endArrow=classic;endFill=1;" edge="1" parent="1" source="step11" target="step12">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="time1" value="~200ms/slice" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#FF0000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="420" width="100" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="time2" value="~5-15s total" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#FF0000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="620" width="100" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="time3" value="~2-5s" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=10;fontColor=#FF0000;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="720" width="100" height="30" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
