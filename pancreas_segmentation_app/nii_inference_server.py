@@ -265,9 +265,9 @@ def generate_3d_mesh_from_masks(volume_masks, spacing=(1.0, 1.0, 1.0)):
                 faces=faces,
                 vertex_normals=normals
             )
-            # Set cyan color with semi-transparency for all vertices
+            # Set bright cyan color with full opacity for all vertices
             num_vertices = len(verts)
-            pancreas_mesh.visual.vertex_colors = np.tile([0, 255, 255, 200], (num_vertices, 1))
+            pancreas_mesh.visual.vertex_colors = np.tile([0, 255, 255, 255], (num_vertices, 1))
             
             # Simplify mesh for web performance (optional)
             try:
@@ -738,20 +738,20 @@ def process_ct_slice(slice_data, z_idx, pancreas_model, tumor_model, use_context
     return results
 
 def create_overlay(slice_data, pancreas_mask, tumor_mask):
-    """Create RGB overlay with pancreas (cyan) and tumor (red)"""
+    """Create RGB overlay with pancreas (bright yellow) and tumor (red)"""
     # Normalize slice to [0, 255]
     img = hu_window(slice_data)
     img = cv2.resize(img, (256, 256))
     img_rgb = cv2.cvtColor((img * 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
     
-    # Draw pancreas contours (cyan) - thin outline
+    # Draw pancreas contours (bright yellow) - thick outline for visibility
     if pancreas_mask is not None and np.any(pancreas_mask == 1):
         contours, _ = cv2.findContours(
             pancreas_mask.astype(np.uint8),
             cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_SIMPLE
         )
-        cv2.drawContours(img_rgb, contours, -1, (0, 255, 255), 1)  # Cyan (RGB)
+        cv2.drawContours(img_rgb, contours, -1, (255, 255, 0), 2)  # Yellow (BGR), thicker
     
     # Draw tumor contours (red) - thin outline
     if tumor_mask is not None and np.any(tumor_mask == 1):
@@ -760,7 +760,7 @@ def create_overlay(slice_data, pancreas_mask, tumor_mask):
             cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_SIMPLE
         )
-        cv2.drawContours(img_rgb, contours, -1, (255, 0, 0), 1)  # Red (RGB)
+        cv2.drawContours(img_rgb, contours, -1, (255, 0, 0), 2)  # Red (BGR), thicker
     
     return img_rgb
 
@@ -834,11 +834,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         global tumor_context, accumulated_masks, detected_regions
         try:
             content_length = int(self.headers['Content-Length'])
+            print(f"[INFO] Received NIfTI file request: {content_length} bytes")
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data)
             
             # Decode base64 file
             file_bytes = base64.b64decode(data['file'])
+            print(f"[INFO] Decoded file: {len(file_bytes)} bytes")
             
             # Load NIfTI file with spacing and spatial metadata
             volume, spacing, affine, origin = load_nii_file(file_bytes)
@@ -901,6 +903,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode())
             
         except Exception as e:
+            import traceback
+            print(f"[ERROR] Failed to load NIfTI file: {e}")
+            traceback.print_exc()
             self.send_response(500)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')

@@ -414,7 +414,7 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
           <div class="legend">
             <div class="legend-item">
               <div class="legend-color legend-cyan"></div>
-              <span class="legend-label">Pancreas Tissue</span>
+              <span class="legend-label">Pancreas Tissue (Cyan)</span>
             </div>
             <div class="legend-item">
               <div class="legend-color legend-red"></div>
@@ -950,14 +950,14 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
                   transparent: false
                 });
               } else if (isPancreas) {
-                console.log('  Applying PANCREAS material (cyan)');
+                console.log('  Applying PANCREAS material (bright cyan)');
                 child.material = new THREE.MeshStandardMaterial({
                   color: 0x00ffff,  // Cyan
                   side: THREE.DoubleSide,
-                  metalness: 0.3,
-                  roughness: 0.7,
-                  opacity: 0.8,
-                  transparent: true
+                  metalness: 0.1,
+                  roughness: 0.4,
+                  opacity: 1.0,
+                  transparent: false
                 });
               } else {
                 // Default: assume pancreas if not tumor
@@ -965,10 +965,10 @@ class _Volume3DViewerState extends State<Volume3DViewer> {
                 child.material = new THREE.MeshStandardMaterial({
                   color: 0x00ffff,
                   side: THREE.DoubleSide,
-                  metalness: 0.3,
-                  roughness: 0.7,
-                  opacity: 0.8,
-                  transparent: true
+                  metalness: 0.1,
+                  roughness: 0.4,
+                  opacity: 1.0,
+                  transparent: false
                 });
               }
               

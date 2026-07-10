@@ -14,8 +14,10 @@
 *.zip
 *.tar.gz
 
-# Python virtual environment
+# Python virtual environments
 .venv/
+.venv_py312/
+.venv_uv/
 venv/
 __pycache__/
 *.pyc
@@ -25,3 +27,24 @@ build/
 *.dll
 *.pyd
 *.so
+
+# Flutter / Dart
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+pancreas_segmentation_app/build/
+pancreas_segmentation_app/.dart_tool/
+
+# Generated Flutter web assets
+pancreas_segmentation_app/web/assets/
+pancreas_segmentation_app/web/icons/
+
+# Large NIfTI dataset files
+dataset/Task07_Pancreas/imagesTr/
+dataset/Task07_Pancreas/imagesTs/
+dataset/Task07_Pancreas/labelsTr/
+
+# macOS metadata files (from cross-platform archives)
+._*
+.DS_Store

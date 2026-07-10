@@ -94,7 +94,12 @@ class NiiService extends ChangeNotifier {
       ).timeout(const Duration(seconds: 120));
       
       if (response.statusCode != 200) {
-        throw Exception('Server error: ${response.statusCode}');
+        String errMsg = 'Server error: ${response.statusCode}';
+        try {
+          final errData = jsonDecode(response.body);
+          if (errData['error'] != null) errMsg = errData['error'];
+        } catch (_) {}
+        throw Exception(errMsg);
       }
       
       final result = jsonDecode(response.body);
